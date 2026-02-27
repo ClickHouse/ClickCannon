@@ -106,11 +106,16 @@ func (w *insertWorker) start() {
 		}
 	}(c)
 
-	for {
-		insertBlock := w.blockPool.Acquire()
-		insertBlock.Reset()
-		insertInput := insertBlock.Input()
+	// Acquire insertBlock once for the worker's lifetime. Keeping it outside the
+	// INSERT loop prevents a deadlock when read.threads == insert.threads: if all
+	// insert workers released and re-acquired insertBlocks simultaneously, the pool
+	// could be exhausted (queue full + readers each holding a block = exact pool
+	// capacity), leaving no block for any insert worker to acquire.
+	insertBlock := w.blockPool.Acquire()
+	insertInput := insertBlock.Input()
+	defer w.blockPool.Release(insertBlock)
 
+	for {
 		// Before starting query, wait for first block
 		// proto.Input is not set on first block since it hasn't been swapped in yet.
 		var currentInput proto.Input
@@ -184,8 +189,6 @@ func (w *insertWorker) start() {
 		}); err != nil {
 			w.logErr(fmt.Errorf("failed to insert: %w", err))
 		}
-
-		w.blockPool.Release(insertBlock)
 	}
 }
 

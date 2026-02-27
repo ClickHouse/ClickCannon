@@ -58,9 +58,10 @@ func main() {
 	}
 
 	fmt.Println("run ID:", runID.String())
+	fmt.Println("label:", config.Label)
 	fmt.Println("data type:", config.Read.DataType)
 	fmt.Println("speed limit:", FormatBytes(bytesPerSecond))
-	mw, err := newMetricsWorker(runID.String(), config.Read.DataType, bytesPerSecond, config.Metrics.ClickHouseDSN, config.Metrics.Database, config.Metrics.RunTable, config.Metrics.MetricsTable)
+	mw, err := newMetricsWorker(runID.String(), config.Label, config.Read.DataType, bytesPerSecond, config.Metrics.ClickHouseDSN, config.Metrics.Database, config.Metrics.RunTable, config.Metrics.MetricsTable)
 	if err != nil {
 		panic(err)
 	}
@@ -73,7 +74,7 @@ func main() {
 	readCtx, cancelReaders := context.WithCancel(context.Background())
 	readWorkers := make([]*readWorker, 0, config.Read.Threads)
 	var readWg sync.WaitGroup
-	go readScheduler(readCtx, cancelReaders, mw, otelFiles, readerDone, func(id int, f otelFile) {
+	go readScheduler(readCtx, cancelReaders, &readWg, otelFiles, readerDone, func(id int, f otelFile) {
 		w := newReadWorker(
 			id, config.Read.ShiftTimestamp, f.Path, f.Compressed,
 			bytesPerSecondPerWorker(bytesPerSecond, uint64(config.Read.Threads)), config.Read.Passthrough,
@@ -138,9 +139,11 @@ func main() {
 	}
 
 	readWg.Wait()
+	fmt.Println("read groups closed")
 	close(insertQueue)
 	insertWg.Wait()
 
+	fmt.Println("insert groups closed")
 	fmt.Println("done")
 }
 
@@ -213,23 +216,13 @@ func getDataFiles(folderPath string) ([]otelFile, error) {
 	return files, nil
 }
 
-func readScheduler(ctx context.Context, cancelReaderCtx context.CancelFunc, metrics MetricsStore, files []otelFile, readerDone chan struct{}, startReader func(id int, f otelFile)) {
+func readScheduler(ctx context.Context, cancelReaderCtx context.CancelFunc, readWg *sync.WaitGroup, files []otelFile, readerDone chan struct{}, startReader func(id int, f otelFile)) {
 	for i := 0; i < len(files); i++ {
 		nextFile := files[i]
 		startReader(i, nextFile)
 		readerDone <- struct{}{}
 	}
 
-	// TODO: no.
-	for {
-		select {
-		case <-time.After(1 * time.Second):
-			if metrics.GetMetric(MetricNameActiveReaders) == 0 {
-				cancelReaderCtx()
-				return
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
+	readWg.Wait()
+	cancelReaderCtx()
 }

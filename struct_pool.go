@@ -1,5 +1,7 @@
 package main
 
+import "context"
+
 type StructPool[T any] struct {
 	pool chan T
 }
@@ -23,6 +25,16 @@ func NewStructPool[T any](poolSize int, newInstance func() (T, error)) (*StructP
 
 func (p *StructPool[T]) Acquire() T {
 	return <-p.pool
+}
+
+func (p *StructPool[T]) AcquireCtx(ctx context.Context) (T, bool) {
+	select {
+	case v := <-p.pool:
+		return v, true
+	case <-ctx.Done():
+		var zero T
+		return zero, false
+	}
 }
 
 func (p *StructPool[T]) Release(v T) {

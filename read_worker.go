@@ -98,8 +98,12 @@ func (w *readWorker) start(ctx context.Context) {
 
 	rd := proto.NewReader(w.speedRd)
 
-	for ctx.Err() == nil {
-		cols := w.blockPool.Acquire()
+	for {
+		cols, ok := w.blockPool.AcquireCtx(ctx)
+		if !ok {
+			return
+		}
+
 		colsRes := cols.Results()
 		err = dec.DecodeRawBlock(rd, 54451, colsRes)
 		if errors.Is(err, io.EOF) {
@@ -128,7 +132,12 @@ func (w *readWorker) start(ctx context.Context) {
 			// Block is immediately released, never sent to the insert queue.
 			w.blockPool.Release(cols)
 		} else {
-			w.insertQueue <- cols
+			select {
+			case w.insertQueue <- cols:
+			case <-ctx.Done():
+				w.blockPool.Release(cols)
+				return
+			}
 		}
 	}
 }

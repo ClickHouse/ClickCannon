@@ -14,6 +14,7 @@ import (
 
 type metricsWorker struct {
 	runID     string
+	label     string
 	conn      driver.Conn
 	insertSQL string
 
@@ -88,7 +89,7 @@ type MetricEntry struct {
 	Value     uint64
 }
 
-func newMetricsWorker(runID, dataType string, targetBytesPerSecond uint64, clickhouseDSN, metricsDatabase, runTable, metricsTable string) (*metricsWorker, error) {
+func newMetricsWorker(runID, label, dataType string, targetBytesPerSecond uint64, clickhouseDSN, metricsDatabase, runTable, metricsTable string) (*metricsWorker, error) {
 	w := metricsWorker{
 		runID:                runID,
 		dataType:             dataType,
@@ -119,6 +120,7 @@ func newMetricsWorker(runID, dataType string, targetBytesPerSecond uint64, click
 		runDDL := fmt.Sprintf(`
 			CREATE TABLE IF NOT EXISTS %q.%q (
 				run_id String,
+				label String DEFAULT '',
 				timestamp DateTime64(3),
 			    data_type LowCardinality(String),
 			    target_bytes_per_second UInt64
@@ -131,8 +133,8 @@ func newMetricsWorker(runID, dataType string, targetBytesPerSecond uint64, click
 			return nil, fmt.Errorf("failed to create run table: %w", err)
 		}
 
-		insertRunSQL := fmt.Sprintf(`INSERT INTO %q.%q VALUES (?, ?, ?, ?)`, metricsDatabase, runTable)
-		err = w.conn.Exec(context.Background(), insertRunSQL, runID, time.Now(), dataType, targetBytesPerSecond)
+		insertRunSQL := fmt.Sprintf(`INSERT INTO %q.%q VALUES (?, ?, ?, ?, ?)`, metricsDatabase, runTable)
+		err = w.conn.Exec(context.Background(), insertRunSQL, runID, label, time.Now(), dataType, targetBytesPerSecond)
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert run: %w", err)
 		}
@@ -162,9 +164,12 @@ func newMetricsWorker(runID, dataType string, targetBytesPerSecond uint64, click
 func (w *metricsWorker) start(ctx context.Context) {
 	go w.processMetrics(ctx)
 
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for ctx.Err() == nil {
 		select {
-		case <-time.After(1 * time.Second):
+		case <-ticker.C:
 			w.mu.Lock()
 			activeReaders := w.metrics[MetricNameActiveReaders]
 			activeInserters := w.metrics[MetricNameActiveInserters]
@@ -199,10 +204,13 @@ func (w *metricsWorker) start(ctx context.Context) {
 			)
 
 			if w.insertSQL != "" {
-				err := w.pushMetrics(context.Background())
-				if err != nil {
-					fmt.Println(fmt.Errorf("failed to push metrics: %w", err))
-				}
+				snapshot := w.snapshotMetrics()
+				go func() {
+					err := w.pushMetricsSnapshot(context.Background(), snapshot)
+					if err != nil {
+						fmt.Println(fmt.Errorf("failed to push metrics: %w", err))
+					}
+				}()
 			}
 
 			w.resetMetrics()
@@ -269,32 +277,47 @@ func (w *metricsWorker) resetMetrics() {
 	w.pointMetrics = w.pointMetrics[:0]
 }
 
-func (w *metricsWorker) pushMetrics(ctx context.Context) error {
+type metricsSnapshot struct {
+	metrics      map[MetricName]uint64
+	pointMetrics []MetricEntry
+}
+
+func (w *metricsWorker) snapshotMetrics() metricsSnapshot {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	snap := metricsSnapshot{
+		metrics:      make(map[MetricName]uint64, len(w.metrics)),
+		pointMetrics: make([]MetricEntry, len(w.pointMetrics)),
+	}
+	for k, v := range w.metrics {
+		snap.metrics[k] = v
+	}
+	copy(snap.pointMetrics, w.pointMetrics)
+	return snap
+}
+
+func (w *metricsWorker) pushMetricsSnapshot(ctx context.Context, snap metricsSnapshot) error {
 	batch, err := w.conn.PrepareBatch(ctx, w.insertSQL)
 	if err != nil {
 		return fmt.Errorf("failed to prepare metrics batch: %w", err)
 	}
 	defer batch.Close()
 
-	w.mu.Lock()
 	now := time.Now()
-	for name, value := range w.metrics {
+	for name, value := range snap.metrics {
 		err = batch.Append(w.runID, string(name), "", now, value)
 		if err != nil {
-			w.mu.Unlock()
 			return fmt.Errorf("failed to append metric (%s/%d) to batch: %w", name, value, err)
 		}
 	}
 
-	for _, m := range w.pointMetrics {
+	for _, m := range snap.pointMetrics {
 		err = batch.Append(w.runID, string(m.Name), m.Meta, m.Timestamp, m.Value)
 		if err != nil {
-			w.mu.Unlock()
 			return fmt.Errorf("failed to append point metric (%s/%d) to batch: %w", m.Name, m.Value, err)
 		}
 	}
-
-	w.mu.Unlock()
 
 	err = batch.Send()
 	if err != nil {

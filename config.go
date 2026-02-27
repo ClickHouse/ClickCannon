@@ -19,6 +19,8 @@ const ConfigShiftTimestampDate = "date" // Shifts only the date of the input dat
 const ConfigShiftTimestampAll = "all"   // Shifts the input data's timestamp to be relative to the current time.
 
 type Config struct {
+	Label string `yaml:"label"`
+
 	Read struct {
 		DataType   string `yaml:"data_type"`
 		LogsPath   string `yaml:"logs_path"`

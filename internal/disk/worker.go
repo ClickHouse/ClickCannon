@@ -41,6 +41,8 @@ type worker struct {
 
 	blockPool   block.Pool
 	insertQueue chan<- block.SharedColumns
+	cleanup     func()
+	protoReader *proto.Reader
 }
 
 func newWorker(
@@ -54,8 +56,9 @@ func newWorker(
 	metrics metrics.Store,
 	passthrough bool,
 	replayTimeKeeper *block.ReplayTimeKeeper,
-) *worker {
-	return &worker{
+) (*worker, error) {
+
+	w := &worker{
 		id:  id,
 		log: log.With("component", "disk_worker", "id", id, "file", file.Path, "compressed", file.Compressed, "file_index", file.Index, "loop_index", file.LoopIndex),
 
@@ -72,25 +75,25 @@ func newWorker(
 
 		replayTimeKeeper: replayTimeKeeper,
 	}
+	if err := w.buildReader(); err != nil {
+		return nil, err
+	}
+	return w, nil
 }
 
 func (w *worker) UpdateSpeedLimit(bytesPerSecondLimit uint64) {
+	w.bytesPerSecondLimit = bytesPerSecondLimit
 	if w.speedRd == nil {
-		return
+		panic("Speed reader is uninitialized, should be impossible")
 	}
 
-	w.bytesPerSecondLimit = bytesPerSecondLimit
 	w.speedRd.Reset(bytesPerSecondLimit)
 }
 
 func (w *worker) Run(ctx context.Context) error {
 	w.log.Info("started", "speed_limit_bytes", w.bytesPerSecondLimit)
 
-	rd, rdClose, rdErr := w.buildReader()
-	if rdErr != nil {
-		return fmt.Errorf("failed to build reader: %w", rdErr)
-	}
-	defer rdClose()
+	defer w.cleanup()
 
 	var dec proto.Block
 	for {
@@ -101,7 +104,7 @@ func (w *worker) Run(ctx context.Context) error {
 		default:
 		}
 
-		err := w.decodeBlock(ctx, rd, &dec)
+		err := w.decodeBlock(ctx, w.protoReader, &dec)
 		if errors.Is(err, io.EOF) {
 			w.log.Info("finished")
 			return nil
@@ -112,10 +115,10 @@ func (w *worker) Run(ctx context.Context) error {
 	}
 }
 
-func (w *worker) buildReader() (*proto.Reader, func(), error) {
+func (w *worker) buildReader() error {
 	data, err := os.Open(w.file.Path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("opening file: %w", err)
+		return fmt.Errorf("opening file: %w", err)
 	}
 
 	compressedSpeedRd := NewSpeedReader(data, func(n uint64) {
@@ -139,7 +142,7 @@ func (w *worker) buildReader() (*proto.Reader, func(), error) {
 				w.log.Error("closing file", "err", fileErr)
 			}
 
-			return nil, nil, fmt.Errorf("creating zstd reader: %w", err)
+			return fmt.Errorf("creating zstd reader: %w", err)
 		}
 
 		zstdClose = zstdRd.Close
@@ -152,7 +155,7 @@ func (w *worker) buildReader() (*proto.Reader, func(), error) {
 		w.metrics.IncrementMetric(metrics.TotalBytesUncompressed, n)
 	})
 
-	cleanup := func() {
+	w.cleanup = func() {
 		w.speedRd.Close()
 
 		if zstdClose != nil {
@@ -163,8 +166,9 @@ func (w *worker) buildReader() (*proto.Reader, func(), error) {
 			w.log.Error("closing file", "err", fileErr)
 		}
 	}
+	w.protoReader = proto.NewReader(w.speedRd)
 
-	return proto.NewReader(w.speedRd), cleanup, nil
+	return nil
 }
 
 func (w *worker) decodeBlock(ctx context.Context, rd *proto.Reader, dec *proto.Block) error {

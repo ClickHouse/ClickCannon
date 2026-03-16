@@ -130,12 +130,16 @@ func (s *Scheduler) runWorker(ctx context.Context, workerID int, fileCh <-chan d
 				return
 			}
 
-			w := newWorker(workerID, s.workerLog, file, s.diskCfg.ShiftTimestamp, s.getNewWorkerSpeed(), s.blockPool, s.insertQueue, s.metrics, s.passthrough, s.replayTimeKeeper)
+			w, err := newWorker(workerID, s.workerLog, file, s.diskCfg.ShiftTimestamp, s.getNewWorkerSpeed(), s.blockPool, s.insertQueue, s.metrics, s.passthrough, s.replayTimeKeeper)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.log.Warn("newWorker failed, skipping file", "worker_id", workerID, "file", file.Path, "err", err)
+				continue
+			}
 
 			s.register(workerID, w)
 			s.rebalanceSpeed()
 
-			err := w.Run(ctx)
+			err = w.Run(ctx)
 
 			s.unregister(workerID)
 			s.rebalanceSpeed()

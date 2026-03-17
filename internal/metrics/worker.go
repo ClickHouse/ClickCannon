@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"otelspam/internal/block"
 	"runtime"
 	"sync"
@@ -121,46 +122,24 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.log.Info("started")
 	defer w.log.Info("stopped")
 
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(1 * time.Second):
-			// this should be set from somewhere else maybe, but this works fine for now
-			blockPoolCount, blockPoolCapacity := w.blockPool.Stats()
-			w.SetMetric(BlockPoolCount, uint64(blockPoolCount))
-			w.SetMetric(BlockPoolCapacity, uint64(blockPoolCapacity))
-			w.SetMetric(BlockQueueLength, uint64(len(w.blockQueue)))
-			w.SetMetric(BlocksRetiredTotal, uint64(w.blockPool.TotalRetired()))
-
-			// this should be dynamically adjustable in the future, but for now we set it constantly
-			w.SetMetric(TargetBytesPerSecond, w.targetBytesPerSecond)
-
-			w.collectRuntimeMetrics()
-
-			// Drain the queue before pushing so no entries are lost between push and reset
-			w.drainMetricsQueue()
-
-			if w.insertSQL != "" {
-				err := w.pushMetrics(ctx)
-				if err != nil {
-					w.log.Error("failed to push metrics", "err", err)
-					continue
-				}
-			}
-
-			w.resetMetrics()
-		}
-	}
-}
-
-func (w *Worker) drainMetricsQueue() {
-	for {
-		select {
 		case m := <-w.metricsQueue:
 			w.applyMetricEntry(m)
-		default:
-			return
+		case <-ticker.C:
+			w.collectInternalMetrics()
+
+			if w.insertSQL != "" {
+				snapshot, pointSnapshot := w.snapshotAndReset()
+				go w.pushMetricsSnapshot(ctx, snapshot, pointSnapshot)
+			} else {
+				w.resetMetrics()
+			}
 		}
 	}
 }
@@ -189,23 +168,34 @@ func (w *Worker) applyMetricEntry(m Entry) {
 	}
 }
 
-func (w *Worker) collectRuntimeMetrics() {
+// collectInternalMetrics gathers block pool, runtime, and system metrics
+// directly under the lock, avoiding the metrics channel entirely.
+func (w *Worker) collectInternalMetrics() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	blockPoolCount, blockPoolCapacity := w.blockPool.Stats()
+	w.metrics[BlockPoolCount] = uint64(blockPoolCount)
+	w.metrics[BlockPoolCapacity] = uint64(blockPoolCapacity)
+	w.metrics[BlockQueueLength] = uint64(len(w.blockQueue))
+	w.metrics[BlocksRetiredTotal] = uint64(w.blockPool.TotalRetired())
+	w.metrics[TargetBytesPerSecond] = w.targetBytesPerSecond
+
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 
-	w.SetMetric(ProgramHeapAllocBytes, ms.HeapAlloc)
-	w.SetMetric(ProgramSysBytes, ms.Sys)
-	w.SetMetric(ProgramNumGoroutines, uint64(runtime.NumGoroutine()))
-	w.SetMetric(ProgramNumGC, uint64(ms.NumGC))
-	w.SetMetric(ProgramPauseTotalNs, ms.PauseTotalNs)
-	w.SetMetric(ProgramNextGCBytes, ms.NextGC)
-
-	w.SetMetric(ProgramNumCPU, uint64(runtime.NumCPU()))
+	w.metrics[ProgramHeapAllocBytes] = ms.HeapAlloc
+	w.metrics[ProgramSysBytes] = ms.Sys
+	w.metrics[ProgramNumGoroutines] = uint64(runtime.NumGoroutine())
+	w.metrics[ProgramNumGC] = uint64(ms.NumGC)
+	w.metrics[ProgramPauseTotalNs] = ms.PauseTotalNs
+	w.metrics[ProgramNextGCBytes] = ms.NextGC
+	w.metrics[ProgramNumCPU] = uint64(runtime.NumCPU())
 
 	var ru syscall.Rusage
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err == nil {
-		w.SetMetric(ProgramCPUUserNs, uint64(ru.Utime.Nano()))
-		w.SetMetric(ProgramCPUSysNs, uint64(ru.Stime.Nano()))
+		w.metrics[ProgramCPUUserNs] = uint64(ru.Utime.Nano())
+		w.metrics[ProgramCPUSysNs] = uint64(ru.Stime.Nano())
 	}
 }
 
@@ -213,8 +203,13 @@ func (w *Worker) resetMetrics() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	w.resetMetricsLocked()
+}
+
+// resetMetricsLocked zeroes resettable counters and clears point metrics.
+// Caller must hold w.mu.
+func (w *Worker) resetMetricsLocked() {
 	for name := range w.metrics {
-		// Skip resetting these. They should probably go in their own table or something
 		switch name {
 		case TotalRows:
 		case TotalBytesCompressed:
@@ -246,10 +241,33 @@ func (w *Worker) resetMetrics() {
 	w.pointMetrics = w.pointMetrics[:0]
 }
 
-func (w *Worker) pushMetrics(ctx context.Context) error {
+// snapshotAndReset copies the current metrics state and resets counters,
+// returning owned copies safe to use from another goroutine.
+func (w *Worker) snapshotAndReset() (map[Name]uint64, []Entry) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	snapshot := make(map[Name]uint64, len(w.metrics))
+	maps.Copy(snapshot, w.metrics)
+
+	var pointSnapshot []Entry
+	if len(w.pointMetrics) > 0 {
+		pointSnapshot = make([]Entry, len(w.pointMetrics))
+		copy(pointSnapshot, w.pointMetrics)
+	}
+
+	w.resetMetricsLocked()
+
+	return snapshot, pointSnapshot
+}
+
+// pushMetricsSnapshot sends a pre-built snapshot to ClickHouse.
+// Safe to call from a goroutine since it owns the snapshot data.
+func (w *Worker) pushMetricsSnapshot(ctx context.Context, snapshot map[Name]uint64, pointSnapshot []Entry) {
 	batch, err := w.conn.PrepareBatch(ctx, w.insertSQL)
 	if err != nil {
-		return fmt.Errorf("failed to prepare metrics batch: %w", err)
+		w.log.Error("failed to prepare metrics batch", "err", err)
+		return
 	}
 	defer func(batch driver.Batch) {
 		batchErr := batch.Close()
@@ -258,34 +276,30 @@ func (w *Worker) pushMetrics(ctx context.Context) error {
 		}
 	}(batch)
 
-	w.mu.Lock()
 	now := time.Now()
-	for name, value := range w.metrics {
+	for name, value := range snapshot {
 		err = batch.Append(w.runID, string(name), now, value, w.mergeAttributes(nil))
 		if err != nil {
-			w.mu.Unlock()
-			return fmt.Errorf("failed to append metric (%s/%d) to batch: %w", name, value, err)
+			w.log.Error("failed to append metric to batch", "name", name, "value", value, "err", err)
+			return
 		}
 	}
 
-	for _, m := range w.pointMetrics {
+	for _, m := range pointSnapshot {
 		err = batch.Append(w.runID, string(m.Name), m.Timestamp, m.Value, w.mergeAttributes(m.Attributes))
 		if err != nil {
-			w.mu.Unlock()
-			return fmt.Errorf("failed to append point metric (%s/%d) to batch: %w", m.Name, m.Value, err)
+			w.log.Error("failed to append point metric to batch", "name", m.Name, "value", m.Value, "err", err)
+			return
 		}
 	}
-
-	w.mu.Unlock()
 
 	err = batch.Send()
 	if err != nil {
-		return fmt.Errorf("failed to send metrics: %w", err)
+		w.log.Error("failed to send metrics", "err", err)
+		return
 	}
 
 	w.log.Debug("pushed metrics", "count", batch.Rows())
-
-	return nil
 }
 
 // mergeAttributes returns config attributes merged with per-metric attributes.

@@ -1,0 +1,50 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    ports:
+      - "8123:8123"  # HTTP
+      - "9000:9000"  # Native
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    environment:
+      CLICKHOUSE_DB: otel
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  otel-collector:
+    image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.96.0
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+  load-generator:
+    build: .
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      LOGS_PER_SECOND: ${LOGS_PER_SECOND:-100000}
+      DURATION_SECONDS: ${DURATION_SECONDS:-86400}
+      BATCH_SIZE: ${BATCH_SIZE:-512}
+      WORKERS: ${WORKERS:-8}
+      ATTR_KEYS_MEAN: ${ATTR_KEYS_MEAN:-0}
+      ATTR_KEYS_STDDEV: ${ATTR_KEYS_STDDEV:-0}
+      RESOURCE_ATTR_KEYS_MEAN: ${RESOURCE_ATTR_KEYS_MEAN:-0}
+      RESOURCE_ATTR_KEYS_STDDEV: ${RESOURCE_ATTR_KEYS_STDDEV:-0}
+      ENABLE_TRACES: ${ENABLE_TRACES:-false}
+    depends_on:
+      - otel-collector
+
+volumes:
+  clickhouse-data:

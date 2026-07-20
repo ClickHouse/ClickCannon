@@ -1,4 +1,9 @@
-FROM golang:1.25-alpine AS builder
+# Build on the native arch and cross-compile via Go (fast, no QEMU). TARGETOS/TARGETARCH
+# default to the host platform for plain `docker build .`, so single-arch builds still work.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 RUN apk add --no-cache git
 
@@ -10,7 +15,7 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o clickcannon .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -installsuffix cgo -o clickcannon .
 
 FROM alpine:latest
 

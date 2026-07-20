@@ -16,9 +16,29 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// client is a thin OTLP/gRPC export client. It holds one gRPC connection and the
-// logs and traces service clients (only one is used per exporter run).
-type client struct {
+// exporter is the transport-agnostic OTLP export client. Both the gRPC and HTTP
+// implementations send the same typed OTLP request messages; only the wire
+// transport differs.
+type exporter interface {
+	exportLogs(ctx context.Context, req *collogspb.ExportLogsServiceRequest) error
+	exportTraces(ctx context.Context, req *coltracepb.ExportTraceServiceRequest) error
+	close() error
+}
+
+// dial creates the export client for the configured protocol. The connection is
+// lazy where possible, so this generally only fails on invalid configuration.
+func dial(cfg *Config) (exporter, error) {
+	switch cfg.protocol() {
+	case protocolHTTP:
+		return dialHTTP(cfg)
+	default:
+		return dialGRPC(cfg)
+	}
+}
+
+// grpcClient is a thin OTLP/gRPC export client. It holds one gRPC connection and
+// the logs and traces service clients (only one is used per exporter run).
+type grpcClient struct {
 	conn    *grpc.ClientConn
 	logs    collogspb.LogsServiceClient
 	traces  coltracepb.TraceServiceClient
@@ -26,9 +46,9 @@ type client struct {
 	timeout time.Duration
 }
 
-// dial creates a lazy gRPC client. grpc.NewClient does not open a connection
+// dialGRPC creates a lazy gRPC client. grpc.NewClient does not open a connection
 // until the first RPC, so this only fails on invalid configuration.
-func dial(cfg *Config) (*client, error) {
+func dialGRPC(cfg *Config) (*grpcClient, error) {
 	target, plaintext := parseTarget(cfg.URL)
 	if cfg.Insecure {
 		plaintext = true
@@ -49,7 +69,7 @@ func dial(cfg *Config) (*client, error) {
 		return nil, fmt.Errorf("failed to create grpc client for %q: %w", target, err)
 	}
 
-	c := &client{
+	c := &grpcClient{
 		conn:    conn,
 		logs:    collogspb.NewLogsServiceClient(conn),
 		traces:  coltracepb.NewTraceServiceClient(conn),
@@ -61,21 +81,21 @@ func dial(cfg *Config) (*client, error) {
 	return c, nil
 }
 
-func (c *client) exportLogs(ctx context.Context, req *collogspb.ExportLogsServiceRequest) error {
+func (c *grpcClient) exportLogs(ctx context.Context, req *collogspb.ExportLogsServiceRequest) error {
 	ctx, cancel := c.callContext(ctx)
 	defer cancel()
 	_, err := c.logs.Export(ctx, req)
 	return err
 }
 
-func (c *client) exportTraces(ctx context.Context, req *coltracepb.ExportTraceServiceRequest) error {
+func (c *grpcClient) exportTraces(ctx context.Context, req *coltracepb.ExportTraceServiceRequest) error {
 	ctx, cancel := c.callContext(ctx)
 	defer cancel()
 	_, err := c.traces.Export(ctx, req)
 	return err
 }
 
-func (c *client) callContext(ctx context.Context) (context.Context, context.CancelFunc) {
+func (c *grpcClient) callContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if c.md != nil {
 		ctx = metadata.NewOutgoingContext(ctx, c.md)
 	}
@@ -85,7 +105,7 @@ func (c *client) callContext(ctx context.Context) (context.Context, context.Canc
 	return context.WithCancel(ctx)
 }
 
-func (c *client) close() error {
+func (c *grpcClient) close() error {
 	return c.conn.Close()
 }
 

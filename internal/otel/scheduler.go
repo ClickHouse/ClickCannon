@@ -12,7 +12,8 @@ import (
 )
 
 // Scheduler manages the OTLP exporter worker goroutines. Each worker consumes
-// blocks from the shared queue, converts them to OTLP, and exports over gRPC.
+// blocks from the shared queue, converts them to OTLP, and exports over the
+// configured transport (gRPC or HTTP).
 type Scheduler struct {
 	log       *slog.Logger
 	workerLog *slog.Logger

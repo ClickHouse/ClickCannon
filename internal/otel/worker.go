@@ -23,7 +23,7 @@ type batch interface {
 	len() int
 	// flush exports the accumulated rows and returns the wire size and row
 	// count sent. The batch is NOT reset on error so the caller can decide.
-	flush(ctx context.Context, c *client) (bytesSent, rows int, err error)
+	flush(ctx context.Context, c exporter) (bytesSent, rows int, err error)
 	// reset clears the accumulated rows.
 	reset()
 }
@@ -47,7 +47,7 @@ func (lb *logsBatch) addBlock(blk block.SharedColumns) {
 
 func (lb *logsBatch) len() int { return lb.b.len() }
 
-func (lb *logsBatch) flush(ctx context.Context, c *client) (int, int, error) {
+func (lb *logsBatch) flush(ctx context.Context, c exporter) (int, int, error) {
 	req := lb.b.build()
 	size := proto.Size(req)
 	rows := lb.b.len()
@@ -78,7 +78,7 @@ func (tb *tracesBatch) addBlock(blk block.SharedColumns) {
 
 func (tb *tracesBatch) len() int { return tb.b.len() }
 
-func (tb *tracesBatch) flush(ctx context.Context, c *client) (int, int, error) {
+func (tb *tracesBatch) flush(ctx context.Context, c exporter) (int, int, error) {
 	req := tb.b.build()
 	size := proto.Size(req)
 	rows := tb.b.len()
@@ -149,7 +149,7 @@ func (w *worker) Run(ctx context.Context) error {
 	}
 	defer func() {
 		if closeErr := c.close(); closeErr != nil {
-			w.log.Debug("failed to close grpc client", "err", closeErr)
+			w.log.Debug("failed to close exporter client", "err", closeErr)
 		}
 	}()
 

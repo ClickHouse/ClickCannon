@@ -1,6 +1,9 @@
 package disk
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 type Config struct {
 	Enabled bool `yaml:"enabled"`
@@ -33,7 +36,7 @@ type Config struct {
 	HasTimestampTime bool `yaml:"has_timestamp_time"`
 }
 
-func (c Config) Validate() error {
+func (c Config) Validate(dataType string) error {
 	if !c.Enabled {
 		return nil
 	}
@@ -42,16 +45,24 @@ func (c Config) Validate() error {
 		return errors.New("must set threads to a value greater than zero")
 	}
 
-	if c.LogsPath == "" {
-		return errors.New("logs_path is empty")
+	pathRequired := false
+	pathName := ""
+	switch dataType {
+	case "logs":
+		pathRequired = c.LogsPath == ""
+		pathName = "logs_path"
+	case "traces":
+		pathRequired = c.TracesPath == ""
+		pathName = "traces_path"
+	case "profiles":
+		pathRequired = c.ProfilesPath == ""
+		pathName = "profiles_path"
+	default:
+		return fmt.Errorf("unsupported data type %q", dataType)
 	}
 
-	if c.TracesPath == "" {
-		return errors.New("traces_path is empty")
-	}
-
-	if c.ProfilesPath == "" {
-		return errors.New("profiles_path is empty")
+	if pathRequired {
+		return fmt.Errorf("%s is empty", pathName)
 	}
 
 	if c.MiBytesPerSecondLimit < 1 {

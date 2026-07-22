@@ -88,7 +88,7 @@ func (c Config) Validate() error {
 		return errors.New("otel export does not support data_type: profiles")
 	}
 
-	if err := c.Disk.Validate(); err != nil {
+	if err := c.Disk.Validate(c.App.DataType); err != nil {
 		return fmt.Errorf("disk: %w", err)
 	}
 
@@ -96,7 +96,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("generate: %w", err)
 	}
 
-	if err := c.Insert.Validate(); err != nil {
+	if err := c.Insert.Validate(c.App.DataType); err != nil {
 		return fmt.Errorf("insert: %w", err)
 	}
 

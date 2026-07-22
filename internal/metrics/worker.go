@@ -45,7 +45,7 @@ type Worker struct {
 	pointMetrics []Entry
 }
 
-func NewWorker(log *slog.Logger, runID, configName, dataType string, targetBytesPerSecond, targetGenerateRowsPerSecond uint64, runAttr map[string]string, cfg *Config, blockPool block.Pool, blockQueue chan block.SharedColumns) (*Worker, error) {
+func NewWorker(log *slog.Logger, runID, configName, dataType string, targetBytesPerSecond, targetGenerateRowsPerSecond uint64, runAttr map[string]string, cfg *Config, clickhouseDSN string, blockPool block.Pool, blockQueue chan block.SharedColumns) (*Worker, error) {
 	w := Worker{
 		log:                         log.With("component", "metrics_worker", "data_type", dataType),
 		runID:                       runID,
@@ -62,8 +62,8 @@ func NewWorker(log *slog.Logger, runID, configName, dataType string, targetBytes
 		pointMetrics: make([]Entry, 0, 100_000),
 	}
 
-	if cfg.ClickHouseDSN != "" {
-		opt, err := clickhouse.ParseDSN(cfg.ClickHouseDSN)
+	if clickhouseDSN != "" {
+		opt, err := clickhouse.ParseDSN(clickhouseDSN)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse DSN: %w", err)
 		}

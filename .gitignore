@@ -45,3 +45,6 @@ trace_data/*native*
 sync*.sh
 runloop.sh
 *.sql
+vendor/*
+.kiro/*
+docs/*

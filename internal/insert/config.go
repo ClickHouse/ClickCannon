@@ -44,7 +44,7 @@ type ClickHouseConfig struct {
 	ProfilesTable string `yaml:"profiles_table"`
 }
 
-func (c ClickHouseConfig) Validate() error {
+func (c ClickHouseConfig) Validate(dataType string) error {
 	if c.Address == "" {
 		return errors.New("must set address")
 	}
@@ -59,22 +59,27 @@ func (c ClickHouseConfig) Validate() error {
 		return errors.New("must set database")
 	}
 
-	if c.LogsTable == "" {
-		return errors.New("must set logs_table")
-	}
-
-	if c.TracesTable == "" {
-		return errors.New("must set traces_table")
-	}
-
-	if c.ProfilesTable == "" {
-		return errors.New("must set profiles_table")
+	switch dataType {
+	case "logs":
+		if c.LogsTable == "" {
+			return errors.New("must set logs_table")
+		}
+	case "traces":
+		if c.TracesTable == "" {
+			return errors.New("must set traces_table")
+		}
+	case "profiles":
+		if c.ProfilesTable == "" {
+			return errors.New("must set profiles_table")
+		}
+	default:
+		return fmt.Errorf("unsupported data type %q", dataType)
 	}
 
 	return nil
 }
 
-func (c Config) Validate() error {
+func (c Config) Validate(dataType string) error {
 	if !c.Enabled {
 		return nil
 	}
@@ -91,7 +96,7 @@ func (c Config) Validate() error {
 		return errors.New("worker_retirement_batches must be >= 0")
 	}
 
-	if err := c.ClickHouse.Validate(); err != nil {
+	if err := c.ClickHouse.Validate(dataType); err != nil {
 		return fmt.Errorf("clickhouse: %w", err)
 	}
 

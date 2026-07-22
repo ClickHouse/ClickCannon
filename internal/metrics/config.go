@@ -17,10 +17,6 @@ func (c Config) Validate() error {
 		return nil
 	}
 
-	if c.ClickHouseDSN == "" {
-		return errors.New("must set clickhouse_dsn")
-	}
-
 	if c.Database == "" {
 		return errors.New("must set database")
 	}

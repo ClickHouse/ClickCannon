@@ -167,17 +167,68 @@ func (w *worker) buildReader() (*proto.Reader, func(), error) {
 	return proto.NewReader(w.speedRd), cleanup, nil
 }
 
+func isUnsupportedColumnLayoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return contains(msg, "(columns) !=") || contains(msg, "unexpected column")
+}
+
+func contains(s, substr string) bool {
+	return len(substr) == 0 || (len(s) >= len(substr) && (s == substr || containsAt(s, substr, 0)))
+}
+
+func containsAt(s, substr string, start int) bool {
+	if len(substr) == 0 {
+		return true
+	}
+	if start+len(substr) > len(s) {
+		return false
+	}
+	if s[start:start+len(substr)] == substr {
+		return true
+	}
+	return containsAt(s, substr, start+1)
+}
+
 func (w *worker) decodeBlock(ctx context.Context, rd *proto.Reader, dec *proto.Block) error {
 	cols := w.blockPool.Acquire()
 	cols.Reset()
-	colsRes := cols.Results()
-	err := dec.DecodeRawBlock(rd, 54451, colsRes)
-	if errors.Is(err, io.EOF) {
-		w.blockPool.Release(cols)
-		return io.EOF
-	} else if err != nil {
-		w.blockPool.Release(cols)
-		return fmt.Errorf("failed to decode block: %w", err)
+
+	var colsRes proto.Results
+	if dyn, ok := cols.(*block.DynamicSharedColumns); ok {
+		colsRes = make(proto.Results, 0)
+		err := dec.DecodeRawBlock(rd, 54451, colsRes.Auto())
+		if errors.Is(err, io.EOF) {
+			w.blockPool.Release(cols)
+			return io.EOF
+		} else if err != nil {
+			w.blockPool.Release(cols)
+			if isUnsupportedColumnLayoutError(err) {
+				w.log.Warn("skipping incompatible block layout", "err", err)
+				return nil
+			}
+			return fmt.Errorf("failed to decode block: %w", err)
+		}
+		if err := dyn.BindResults(colsRes); err != nil {
+			w.blockPool.Release(cols)
+			return fmt.Errorf("failed to bind decoded columns: %w", err)
+		}
+	} else {
+		colsRes = cols.Results()
+		err := dec.DecodeRawBlock(rd, 54451, colsRes)
+		if errors.Is(err, io.EOF) {
+			w.blockPool.Release(cols)
+			return io.EOF
+		} else if err != nil {
+			w.blockPool.Release(cols)
+			if isUnsupportedColumnLayoutError(err) {
+				w.log.Warn("skipping incompatible block layout", "err", err)
+				return nil
+			}
+			return fmt.Errorf("failed to decode block: %w", err)
+		}
 	}
 
 	if w.file.LoopIndex == 0 {

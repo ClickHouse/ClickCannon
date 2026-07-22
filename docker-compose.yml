@@ -1,0 +1,21 @@
+services:
+  grafana:
+    image: grafana/grafana:11.5.0
+    container_name: clickcannon-grafana
+    restart: unless-stopped
+    user: "472:472"  # Grafana 官方镜像默认 UID 
+    network_mode: "host" 
+    # ports:
+      # - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ./grafana/data:/var/lib/grafana:Z
+      - ./grafana/config/grafana.ini:/etc/grafana/grafana.ini:ro,Z
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro,Z 
+    mem_limit: 1g
+

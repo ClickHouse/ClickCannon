@@ -48,3 +48,5 @@ runloop.sh
 vendor/*
 .kiro/*
 docs/*
+scribe/*
+grafana/*

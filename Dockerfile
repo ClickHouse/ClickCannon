@@ -23,4 +23,4 @@ WORKDIR /root/
 
 COPY --from=builder /app/clickcannon .
 
-CMD ["./clickcannon"]
+ENTRYPOINT ["./clickcannon"]

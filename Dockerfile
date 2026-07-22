@@ -17,9 +17,7 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -installsuffix cgo -o clickcannon .
 
-FROM alpine:latest
-
-RUN apk --no-cache add ca-certificates
+FROM gcr.io/distroless/static-debian13
 
 WORKDIR /root/
 

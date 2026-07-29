@@ -1,4 +1,4 @@
-name: Go Build, Vet & Test
+name: CI
 
 on:
   push:
@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   test:
-    name: Build, vet & test (race)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

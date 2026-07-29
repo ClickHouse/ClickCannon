@@ -60,6 +60,88 @@ func (c *LogsSharedColumns) ReadLogRow(i int, dst *LogRow) {
 	dst.LogAttrs = MapRowKV(dst.LogAttrs[:0], c.logAttributes, i)
 }
 
+// Rows implements block.MetricsReader for all five metrics column sets.
+func (c *metricsColumnsBase) Rows() int { return len(c.timeUnix.Data) }
+
+// readMetricCommon fills the columns shared by all five metrics tables.
+func (c *metricsColumnsBase) readMetricCommon(i int, dst *MetricRow) {
+	dst.ResourceAttrs = MapRowKV(dst.ResourceAttrs[:0], c.resourceAttributes, i)
+	dst.ResourceSchemaURL = c.resourceSchemaURL.Row(i)
+	dst.ScopeName = c.scopeName.Row(i)
+	dst.ScopeVersion = c.scopeVersion.Row(i)
+	dst.ScopeAttrs = MapRowKV(dst.ScopeAttrs[:0], c.scopeAttributes, i)
+	dst.ScopeDroppedAttrCount = c.scopeDroppedAttrCount[i]
+	dst.ScopeSchemaURL = c.scopeSchemaURL.Row(i)
+	dst.ServiceName = c.serviceName.RowString(i)
+	dst.MetricName = c.metricName.RowString(i)
+	dst.MetricDescription = c.metricDescription.Row(i)
+	dst.MetricUnit = c.metricUnit.Row(i)
+	dst.Attrs = MapRowKV(dst.Attrs[:0], c.attributes, i)
+	dst.StartTime = c.startTimeUnix.Data[i].Time()
+	dst.Time = c.timeUnix.Data[i].Time()
+}
+
+// ReadMetricRow implements block.MetricsReader for the disk decode path.
+func (c *MetricsGaugeSharedColumns) ReadMetricRow(i int, dst *MetricRow) {
+	dst.Type = MetricTypeGauge
+	c.readMetricCommon(i, dst)
+	dst.Value = c.value[i]
+	dst.Flags = c.flags[i]
+}
+
+// ReadMetricRow implements block.MetricsReader for the disk decode path.
+func (c *MetricsSumSharedColumns) ReadMetricRow(i int, dst *MetricRow) {
+	dst.Type = MetricTypeSum
+	c.readMetricCommon(i, dst)
+	dst.Value = c.value[i]
+	dst.Flags = c.flags[i]
+	dst.AggregationTemporality = c.aggregationTemporality[i]
+	dst.IsMonotonic = c.isMonotonic[i]
+}
+
+// ReadMetricRow implements block.MetricsReader for the disk decode path.
+func (c *MetricsHistogramSharedColumns) ReadMetricRow(i int, dst *MetricRow) {
+	dst.Type = MetricTypeHistogram
+	c.readMetricCommon(i, dst)
+	dst.Count = c.count[i]
+	dst.Sum = c.sum[i]
+	dst.BucketCounts = c.bucketCounts.RowAppend(i, dst.BucketCounts[:0])
+	dst.ExplicitBounds = c.explicitBounds.RowAppend(i, dst.ExplicitBounds[:0])
+	dst.Flags = c.flags[i]
+	dst.Min = c.min[i]
+	dst.Max = c.max[i]
+	dst.AggregationTemporality = c.aggregationTemporality[i]
+}
+
+// ReadMetricRow implements block.MetricsReader for the disk decode path.
+func (c *MetricsExpHistogramSharedColumns) ReadMetricRow(i int, dst *MetricRow) {
+	dst.Type = MetricTypeExpHistogram
+	c.readMetricCommon(i, dst)
+	dst.Count = c.count[i]
+	dst.Sum = c.sum[i]
+	dst.Scale = c.scale[i]
+	dst.ZeroCount = c.zeroCount[i]
+	dst.PositiveOffset = c.positiveOffset[i]
+	dst.PositiveBucketCounts = c.positiveBucketCounts.RowAppend(i, dst.PositiveBucketCounts[:0])
+	dst.NegativeOffset = c.negativeOffset[i]
+	dst.NegativeBucketCounts = c.negativeBucketCounts.RowAppend(i, dst.NegativeBucketCounts[:0])
+	dst.Flags = c.flags[i]
+	dst.Min = c.min[i]
+	dst.Max = c.max[i]
+	dst.AggregationTemporality = c.aggregationTemporality[i]
+}
+
+// ReadMetricRow implements block.MetricsReader for the disk decode path.
+func (c *MetricsSummarySharedColumns) ReadMetricRow(i int, dst *MetricRow) {
+	dst.Type = MetricTypeSummary
+	c.readMetricCommon(i, dst)
+	dst.Count = c.count[i]
+	dst.Sum = c.sum[i]
+	dst.QuantileQuantiles = c.quantileQuantile.RowAppend(i, dst.QuantileQuantiles[:0])
+	dst.QuantileValues = c.quantileValues.RowAppend(i, dst.QuantileValues[:0])
+	dst.Flags = c.flags[i]
+}
+
 // Rows implements block.TracesReader.
 func (c *TracesSharedColumns) Rows() int { return len(c.timestamp.Data) }
 

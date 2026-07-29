@@ -97,7 +97,7 @@ When generating traces, each worker independently produces complete traces with 
 
 When generating metrics, each worker produces whole series — data points sharing a `MetricName`, `ServiceName`, resource/scope/datapoint attributes, and `StartTimeUnix`, with `TimeUnix` advancing by the collection interval. Set `app.metrics_type` to pick which OTel metrics table schema is produced (`gauge`, `sum`, `histogram`, `exponential_histogram`, or `summary`); one type is targeted per run. Sums are cumulative (mostly monotonic) counters, histogram bucket counts/sums/min/max are internally consistent, and exemplar columns are emitted empty.
 
-`profiles` and `metrics` are supported by the disk, generate, and insert pipelines only — the otel export sink does not support them.
+`profiles` is supported by the disk, generate, and insert pipelines only — the otel export sink does not support it. `metrics` is supported by all pipelines including the otel export sink.
 
 ## Disk (replay from files)
 
@@ -124,6 +124,39 @@ SELECT * FROM otel.otel_metrics_gauge LIMIT 10000000 INTO OUTFILE 'metrics_gauge
 ```
 
 You can split data across multiple files — each file becomes a unit of work for the disk reader threads.
+
+# Benchmarking an OTel Collector with Metrics (DPM)
+
+The otel export sink can drive an OTLP/gRPC collector endpoint with generated (or disk-replayed) metrics to measure the collector's ingestion throughput in data points per minute (DPM). Enable `generate` + `otel` with `data_type: metrics`:
+
+```yaml
+app:
+  data_type: metrics
+  metrics_type: gauge   # one table schema per run
+generate:
+  enabled: true
+  threads: 4
+  rows_per_block: 2000
+  rows_per_second: 166667   # 10M DPM target; 0 = unlimited
+otel:
+  enabled: true
+  url: collector-host:4317
+  threads: 4
+  batch_size: 2000
+```
+
+**DPM targeting.** Each metrics row is one data point, so `rows_per_second = target DPM / 60`. Achieved DPM is `rate(otel_rows_total) * 60` in the performance metrics.
+
+**Batch sizing matters.** OTLP metric data points are large (~1 KiB each with attributes); collectors default to a 4 MiB gRPC message limit. Keep `otel.batch_size` (and `generate.rows_per_block`, which is the minimum flush granularity) at or below ~2000 rows, or raise the collector's `max_recv_msg_size_mib`. Oversized batches fail with `ResourceExhausted: received message larger than max` and are dropped after retries.
+
+**Finding the ceiling.** First baseline the generator itself: run with both `insert` and `otel` disabled (passthrough mode) to measure the pure generation rate, then against a local no-op collector (`debug` exporter) to measure the conversion+gRPC ceiling. The target collector measurement is only meaningful below both. Then either step `rows_per_second` up across runs until achieved DPM flattens below target, or run unlimited (`rows_per_second: 0`) and let gRPC backpressure find the ceiling. Watch:
+
+- `otel_rows_total` rate flattening below target — the collector is the bottleneck
+- `otel_export_latency_micros` samples rising — earliest saturation signal, before failures appear
+- `otel_exports_failed_total` — batches dropped after retry exhaustion
+- Collector-side `otelcol_receiver_accepted_metric_points` / `otelcol_receiver_refused_metric_points` for ground truth
+
+**Semantics.** Exported metrics preserve OTLP structure: data points are grouped into Metrics by (name, unit, description) under their resource/scope; sums carry cumulative temporality and monotonicity at the metric level; histogram bucket counts, bounds, min/max, and summary quantiles pass through as generated. Exemplars are not exported.
 
 # Memory Management
 

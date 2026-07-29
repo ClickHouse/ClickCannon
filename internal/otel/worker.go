@@ -90,6 +90,37 @@ func (tb *tracesBatch) flush(ctx context.Context, c *client) (int, int, error) {
 
 func (tb *tracesBatch) reset() { tb.b.reset() }
 
+type metricsBatch struct {
+	b   *metricsBuilder
+	row block.MetricRow
+}
+
+func (mb *metricsBatch) addBlock(blk block.SharedColumns) {
+	r, ok := blk.(block.MetricsReader)
+	if !ok {
+		return
+	}
+	n := r.Rows()
+	for i := 0; i < n; i++ {
+		r.ReadMetricRow(i, &mb.row)
+		mb.b.add(&mb.row)
+	}
+}
+
+func (mb *metricsBatch) len() int { return mb.b.len() }
+
+func (mb *metricsBatch) flush(ctx context.Context, c *client) (int, int, error) {
+	req := mb.b.build()
+	size := proto.Size(req)
+	rows := mb.b.len()
+	if err := c.exportMetrics(ctx, req); err != nil {
+		return 0, 0, err
+	}
+	return size, rows, nil
+}
+
+func (mb *metricsBatch) reset() { mb.b.reset() }
+
 type worker struct {
 	id    int
 	idStr string
@@ -117,10 +148,14 @@ func newWorker(id int, log *slog.Logger, cfg *Config, dataType string, blockPool
 }
 
 func (w *worker) newBatch() batch {
-	if w.dataType == "traces" {
+	switch w.dataType {
+	case "traces":
 		return &tracesBatch{b: newTracesBuilder()}
+	case "metrics":
+		return &metricsBatch{b: newMetricsBuilder()}
+	default:
+		return &logsBatch{b: newLogsBuilder()}
 	}
-	return &logsBatch{b: newLogsBuilder()}
 }
 
 // drainRelease returns any blocks still buffered in the queue to the pool. It is
@@ -175,6 +210,7 @@ func (w *worker) Run(ctx context.Context) error {
 		}
 		backoff := baseFlushBackoff
 		for attempt := 1; ; attempt++ {
+			flushStart := time.Now()
 			size, rows, ferr := b.flush(fctx, c)
 			if ferr == nil {
 				b.reset()
@@ -183,6 +219,10 @@ func (w *worker) Run(ctx context.Context) error {
 				w.metrics.IncrementMetric(metrics.OTelBytesTotal, uint64(size))
 				w.metrics.IncrementMetricWithAttr(metrics.OTelRowsWorkerTotal, uint64(rows), "worker_id", w.idStr)
 				w.metrics.IncrementMetricWithAttr(metrics.OTelBatchesWorkerTotal, 1, "worker_id", w.idStr)
+				w.metrics.AddMetricPointWithAttributes(metrics.OTelExportLatencyMicros, uint64(time.Since(flushStart).Microseconds()), map[string]string{
+					"worker_id": w.idStr,
+					"rows":      strconv.Itoa(rows),
+				})
 				return
 			}
 

@@ -75,6 +75,79 @@ type TraceRow struct {
 	Links         []TraceLink
 }
 
+// MetricType discriminates which OTel metrics table schema a MetricRow came
+// from. One run only ever produces a single type, but the neutral row carries
+// it so the exporter does not need out-of-band state.
+type MetricType int
+
+const (
+	MetricTypeGauge MetricType = iota
+	MetricTypeSum
+	MetricTypeHistogram
+	MetricTypeExpHistogram
+	MetricTypeSummary
+)
+
+// MetricRow is a neutral view of a single metric data point row. Common fields
+// are always set; typed fields are only meaningful for the matching Type.
+// Exemplar columns are not carried — the exporter emits data points without
+// exemplars (generated data produces them empty anyway).
+type MetricRow struct {
+	Type MetricType
+
+	// Common columns (all five tables)
+	ResourceAttrs         []KV
+	ResourceSchemaURL     string
+	ScopeName             string
+	ScopeVersion          string
+	ScopeAttrs            []KV
+	ScopeDroppedAttrCount uint32
+	ScopeSchemaURL        string
+	ServiceName           string
+	MetricName            string
+	MetricDescription     string
+	MetricUnit            string
+	Attrs                 []KV
+	StartTime             time.Time
+	Time                  time.Time
+	Flags                 uint32
+
+	// Gauge / Sum
+	Value                  float64
+	AggregationTemporality int32 // sum, histogram, exponential histogram
+	IsMonotonic            bool  // sum
+
+	// Histogram / Exponential histogram / Summary
+	Count uint64
+	Sum   float64
+	Min   float64 // histogram, exponential histogram
+	Max   float64 // histogram, exponential histogram
+
+	// Histogram
+	BucketCounts   []uint64
+	ExplicitBounds []float64
+
+	// Exponential histogram
+	Scale                int32
+	ZeroCount            uint64
+	PositiveOffset       int32
+	PositiveBucketCounts []uint64
+	NegativeOffset       int32
+	NegativeBucketCounts []uint64
+
+	// Summary
+	QuantileQuantiles []float64
+	QuantileValues    []float64
+}
+
+// MetricsReader is implemented by any block column set that holds metric rows.
+type MetricsReader interface {
+	Rows() int
+	// ReadMetricRow fills dst with the row at index i, reusing dst's slices
+	// where possible. All fields relevant to the row's Type are overwritten.
+	ReadMetricRow(i int, dst *MetricRow)
+}
+
 // LogsReader is implemented by any block column set that holds log rows.
 type LogsReader interface {
 	// Rows returns the number of rows currently held.

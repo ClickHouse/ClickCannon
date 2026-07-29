@@ -222,6 +222,49 @@ func TestMetricsGenDiskRoundTrip(t *testing.T) {
 				}
 			}
 
+			// The neutral MetricRow readers on both paths must agree, proving
+			// the disk-path reader (LowCard/map handling) reads what the
+			// generate-path reader wrote.
+			genReader, ok := tc.gen.(block.MetricsReader)
+			if !ok {
+				t.Fatalf("%T does not implement block.MetricsReader", tc.gen)
+			}
+			diskReader, ok := tc.disk.(block.MetricsReader)
+			if !ok {
+				t.Fatalf("%T does not implement block.MetricsReader", tc.disk)
+			}
+			if diskReader.Rows() != n {
+				t.Fatalf("disk reader rows = %d, want %d", diskReader.Rows(), n)
+			}
+			var genRow, diskRow block.MetricRow
+			for i := 0; i < n; i++ {
+				genReader.ReadMetricRow(i, &genRow)
+				diskReader.ReadMetricRow(i, &diskRow)
+				if genRow.Type != diskRow.Type {
+					t.Fatalf("row %d Type = %v, want %v", i, diskRow.Type, genRow.Type)
+				}
+				if genRow.ServiceName != diskRow.ServiceName || genRow.MetricName != diskRow.MetricName || genRow.MetricUnit != diskRow.MetricUnit {
+					t.Fatalf("row %d identity mismatch: gen=%q/%q/%q disk=%q/%q/%q", i,
+						genRow.ServiceName, genRow.MetricName, genRow.MetricUnit,
+						diskRow.ServiceName, diskRow.MetricName, diskRow.MetricUnit)
+				}
+				if !genRow.Time.Truncate(time.Second).Equal(diskRow.Time) {
+					t.Fatalf("row %d Time = %v, want %v", i, diskRow.Time, genRow.Time)
+				}
+				if genRow.Value != diskRow.Value || genRow.Count != diskRow.Count || genRow.Sum != diskRow.Sum {
+					t.Fatalf("row %d value mismatch: gen=%v/%d/%v disk=%v/%d/%v", i,
+						genRow.Value, genRow.Count, genRow.Sum, diskRow.Value, diskRow.Count, diskRow.Sum)
+				}
+				if len(genRow.Attrs) != len(diskRow.Attrs) {
+					t.Fatalf("row %d Attrs length = %d, want %d", i, len(diskRow.Attrs), len(genRow.Attrs))
+				}
+				for j := range genRow.Attrs {
+					if genRow.Attrs[j] != diskRow.Attrs[j] {
+						t.Fatalf("row %d Attrs[%d] = %v, want %v", i, j, diskRow.Attrs[j], genRow.Attrs[j])
+					}
+				}
+			}
+
 			tc.check(t, tc.gen, res, n)
 		})
 	}

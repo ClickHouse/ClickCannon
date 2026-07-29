@@ -140,10 +140,6 @@ func (c *Config) Validate() error {
 		return errors.New("otel export does not support data_type: profiles")
 	}
 
-	if c.App.DataType == ConfigDataTypeMetrics && c.OTel.Enabled {
-		return errors.New("otel export does not support data_type: metrics")
-	}
-
 	if err := c.Disk.Validate(); err != nil {
 		return fmt.Errorf("disk: %w", err)
 	}

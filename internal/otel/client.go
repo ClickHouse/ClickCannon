@@ -8,6 +8,7 @@ import (
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -17,11 +18,12 @@ import (
 )
 
 // client is a thin OTLP/gRPC export client. It holds one gRPC connection and the
-// logs and traces service clients (only one is used per exporter run).
+// logs, traces, and metrics service clients (only one is used per exporter run).
 type client struct {
 	conn    *grpc.ClientConn
 	logs    collogspb.LogsServiceClient
 	traces  coltracepb.TraceServiceClient
+	metrics colmetricspb.MetricsServiceClient
 	md      metadata.MD
 	timeout time.Duration
 }
@@ -53,6 +55,7 @@ func dial(cfg *Config) (*client, error) {
 		conn:    conn,
 		logs:    collogspb.NewLogsServiceClient(conn),
 		traces:  coltracepb.NewTraceServiceClient(conn),
+		metrics: colmetricspb.NewMetricsServiceClient(conn),
 		timeout: cfg.Timeout,
 	}
 	if len(cfg.Headers) > 0 {
@@ -72,6 +75,13 @@ func (c *client) exportTraces(ctx context.Context, req *coltracepb.ExportTraceSe
 	ctx, cancel := c.callContext(ctx)
 	defer cancel()
 	_, err := c.traces.Export(ctx, req)
+	return err
+}
+
+func (c *client) exportMetrics(ctx context.Context, req *colmetricspb.ExportMetricsServiceRequest) error {
+	ctx, cancel := c.callContext(ctx)
+	defer cancel()
+	_, err := c.metrics.Export(ctx, req)
 	return err
 }
 

@@ -188,7 +188,10 @@ insert:
 # sink (insert or otel) can consume the block queue at a time — if both are enabled,
 # insert is disabled and a warning is logged. Row data is passed through verbatim
 # (column values map straight to OTLP fields; no SDK enrichment).
-# Supports logs and traces only (not profiles or metrics).
+# Supports logs, traces, and metrics (not profiles).
+# For metrics, keep batch_size (and generate.rows_per_block, the minimum flush
+# granularity) at or below ~2000 rows — OTLP metric data points are ~1 KiB each
+# and collectors default to a 4 MiB gRPC message limit.
 otel:
   enabled: false
   # OTLP/gRPC endpoint. A leading http:// / https:// / grpc:// scheme is optional;

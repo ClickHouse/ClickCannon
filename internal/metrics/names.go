@@ -96,4 +96,10 @@ const (
 	// Samples
 
 	QueryLatencyMicros Name = "query_latency_micros"
+
+	// OTelExportLatencyMicros records the duration of each successful OTLP
+	// export flush. Rising flush latency is the earliest signal that the
+	// target collector is saturating, before exports start failing.
+	// Attributes: worker_id, rows.
+	OTelExportLatencyMicros Name = "otel_export_latency_micros"
 )

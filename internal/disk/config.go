@@ -11,6 +11,14 @@ type Config struct {
 	TracesPath   string `yaml:"traces_path"`
 	ProfilesPath string `yaml:"profiles_path"`
 
+	// Metrics paths, one per metric type. Default to metrics_<type>_data
+	// when unset so existing configs keep working.
+	MetricsGaugePath        string `yaml:"metrics_gauge_path"`
+	MetricsSumPath          string `yaml:"metrics_sum_path"`
+	MetricsHistogramPath    string `yaml:"metrics_histogram_path"`
+	MetricsExpHistogramPath string `yaml:"metrics_exp_histogram_path"`
+	MetricsSummaryPath      string `yaml:"metrics_summary_path"`
+
 	ReuseBlocks bool `yaml:"reuse_blocks"`
 
 	// BlockRetirementUses is the number of times a block can be acquired before it is retired
@@ -33,7 +41,27 @@ type Config struct {
 	HasTimestampTime bool `yaml:"has_timestamp_time"`
 }
 
-func (c Config) Validate() error {
+func (c *Config) applyDefaults() {
+	if c.MetricsGaugePath == "" {
+		c.MetricsGaugePath = "metrics_gauge_data"
+	}
+	if c.MetricsSumPath == "" {
+		c.MetricsSumPath = "metrics_sum_data"
+	}
+	if c.MetricsHistogramPath == "" {
+		c.MetricsHistogramPath = "metrics_histogram_data"
+	}
+	if c.MetricsExpHistogramPath == "" {
+		c.MetricsExpHistogramPath = "metrics_exp_histogram_data"
+	}
+	if c.MetricsSummaryPath == "" {
+		c.MetricsSummaryPath = "metrics_summary_data"
+	}
+}
+
+func (c *Config) Validate() error {
+	c.applyDefaults()
+
 	if !c.Enabled {
 		return nil
 	}

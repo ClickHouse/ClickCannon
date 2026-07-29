@@ -23,6 +23,7 @@ type Config struct {
 
 	Traces   TracesConfig   `yaml:"traces"`
 	Profiles ProfilesConfig `yaml:"profiles"`
+	Metrics  MetricsConfig  `yaml:"metrics"`
 }
 
 // TracesConfig holds trace-tree shape parameters used by the traces filler.
@@ -32,6 +33,23 @@ type TracesConfig struct {
 	MaxDepth         int    `yaml:"max_depth"`
 	DurationMinUs    uint64 `yaml:"duration_min_us"`
 	DurationMaxUs    uint64 `yaml:"duration_max_us"`
+}
+
+// MetricsConfig holds datapoint-shape parameters used by the metrics filler.
+type MetricsConfig struct {
+	// Number of data points emitted per series (uniform random between min and max).
+	// All points in a series share MetricName, ServiceName, resource/scope/datapoint
+	// attributes, and StartTimeUnix; TimeUnix advances by PointIntervalSeconds.
+	PointsPerSeriesMin int `yaml:"points_per_series_min"`
+	PointsPerSeriesMax int `yaml:"points_per_series_max"`
+	// Seconds between consecutive points in a series (OTel collection interval).
+	PointIntervalSeconds int `yaml:"point_interval_seconds"`
+	// Number of explicit bucket bounds per histogram series.
+	HistogramBuckets int `yaml:"histogram_buckets"`
+	// Number of positive buckets per exponential histogram series.
+	ExpHistogramBuckets int `yaml:"exp_histogram_buckets"`
+	// Scale for exponential histograms.
+	ExpHistogramScale int `yaml:"exp_histogram_scale"`
 }
 
 // ProfilesConfig holds sample-shape parameters used by the profiles filler.
@@ -94,6 +112,28 @@ func (c *Config) Validate() error {
 	}
 	if c.Profiles.PeriodNs == 0 {
 		c.Profiles.PeriodNs = 10000000
+	}
+
+	if c.Metrics.PointsPerSeriesMin < 1 {
+		c.Metrics.PointsPerSeriesMin = 10
+	}
+	if c.Metrics.PointsPerSeriesMax == 0 {
+		c.Metrics.PointsPerSeriesMax = 120
+	}
+	if c.Metrics.PointsPerSeriesMax < c.Metrics.PointsPerSeriesMin {
+		c.Metrics.PointsPerSeriesMax = c.Metrics.PointsPerSeriesMin
+	}
+	if c.Metrics.PointIntervalSeconds < 1 {
+		c.Metrics.PointIntervalSeconds = 15
+	}
+	if c.Metrics.HistogramBuckets < 1 {
+		c.Metrics.HistogramBuckets = 18
+	}
+	if c.Metrics.ExpHistogramBuckets < 1 {
+		c.Metrics.ExpHistogramBuckets = 40
+	}
+	if c.Metrics.ExpHistogramScale == 0 {
+		c.Metrics.ExpHistogramScale = 3
 	}
 
 	return nil

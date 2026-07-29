@@ -117,6 +117,22 @@ func newColArrayDateTime64Raw(batchSize int) *proto.ColArr[proto.DateTime64] {
 	}
 }
 
+func newColArrayDateTime(batchSize int) *proto.ColArr[time.Time] {
+	col := newColDateTime(batchSize)
+	return &proto.ColArr[time.Time]{
+		Offsets: make(proto.ColUInt64, 0, batchSize),
+		Data:    &col,
+	}
+}
+
+func newColArrayFloat64(batchSize int) *proto.ColArr[float64] {
+	col := make(proto.ColFloat64, 0, batchSize)
+	return &proto.ColArr[float64]{
+		Offsets: make(proto.ColUInt64, 0, batchSize),
+		Data:    &col,
+	}
+}
+
 func newColArrayUInt64(batchSize int) *proto.ColArr[uint64] {
 	col := make(proto.ColUInt64, 0, batchSize)
 	return &proto.ColArr[uint64]{

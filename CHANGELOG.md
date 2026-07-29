@@ -4,8 +4,14 @@
 
 ### New Features
 
+- **Metrics support (ingestion)** — A new `metrics` data type joins `logs`, `traces`, and `profiles` across the disk, generate, and insert pipelines. Set `app.data_type: metrics` plus `app.metrics_type` (`gauge`, `sum`, `histogram`, `exponential_histogram`, or `summary`) to target one of the five OTel exporter metrics table schemas per run. Generate mode produces whole series (points sharing metric name, service, and attributes with advancing timestamps, shaped via `generate.metrics`), sums are cumulative counters, and histogram counts/sums/min/max are internally consistent; exemplar columns are emitted empty. Disk mode replays pre-exported `.native` files (`disk.metrics_<type>_path`), and insert targets `insert.clickhouse.metrics_<type>_table` (defaulting to the exporter table names). The otel export sink and user query mode do not yet support metrics.
 - **Profiles support** — A new `profiles` data type joins `logs` and `traces` across the disk, generate, and insert pipelines. Set `app.data_type: profiles` to replay pre-exported profile `.native` files (`disk.profiles_path`), generate synthetic profiles (each row a sample with a random-depth call stack, configurable via `generate.profiles`), and insert into a profiles table (`insert.clickhouse.profiles_table`).
 - **OTel exporter** - Added experimental support for an OpenTelemetry OTLP exporter for disk/generated data.
+
+### Improvements
+
+- **Only the active table is required** — `insert.clickhouse` now only requires the table for the active `data_type` (previously `logs_table`, `traces_table`, and `profiles_table` were all required regardless of data type).
+- **Config defaults now persist** — `Validate()` is now called on a pointer, so defaults applied during validation (e.g. `generate.traces`/`generate.profiles` fallbacks, `disk.shift_timestamp: none`) actually take effect at runtime instead of being applied to a discarded copy.
 
 ## v0.4.0
 

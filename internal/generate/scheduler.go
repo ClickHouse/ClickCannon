@@ -67,6 +67,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	var logsFiller *LogsFiller
 	var tracesFiller *TracesFiller
 	var profilesFiller *ProfilesFiller
+	var metricsFiller *MetricsFiller
 
 	switch s.dataType {
 	case "logs":
@@ -75,6 +76,8 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		tracesFiller = NewTracesFiller(profile, s.cfg.Traces)
 	case "profiles":
 		profilesFiller = NewProfilesFiller(profile, s.cfg.Profiles)
+	case "metrics":
+		metricsFiller = NewMetricsFiller(profile, s.cfg.Metrics)
 	default:
 		return fmt.Errorf("unsupported data type %q", s.dataType)
 	}
@@ -104,6 +107,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			logsFiller:     logsFiller,
 			tracesFiller:   tracesFiller,
 			profilesFiller: profilesFiller,
+			metricsFiller:  metricsFiller,
 		}
 
 		wg.Add(1)

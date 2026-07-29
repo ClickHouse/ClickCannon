@@ -52,6 +52,12 @@ type Profile struct {
 	MappingFileName Gen
 	ProfileAttrs    *MapGen
 	SampleAttrs     *MapGen
+
+	// Metrics-only
+	MetricName        Gen
+	MetricDescription Gen
+	MetricUnit        Gen     // fallback unit when MetricName isn't in the unit map
+	DataPointAttrs    *MapGen // per-datapoint Attributes column
 }
 
 // NewProfile returns an empty Profile. Use the With* builders or set fields directly.
@@ -82,6 +88,11 @@ func (p *Profile) WithFileName(g Gen) *Profile         { p.FileName = g; return 
 func (p *Profile) WithMappingFileName(g Gen) *Profile  { p.MappingFileName = g; return p }
 func (p *Profile) WithProfileAttrs(m *MapGen) *Profile { p.ProfileAttrs = m; return p }
 func (p *Profile) WithSampleAttrs(m *MapGen) *Profile  { p.SampleAttrs = m; return p }
+
+func (p *Profile) WithMetricName(g Gen) *Profile         { p.MetricName = g; return p }
+func (p *Profile) WithMetricDescription(g Gen) *Profile  { p.MetricDescription = g; return p }
+func (p *Profile) WithMetricUnit(g Gen) *Profile         { p.MetricUnit = g; return p }
+func (p *Profile) WithDataPointAttrs(m *MapGen) *Profile { p.DataPointAttrs = m; return p }
 
 // applyDefaults fills any unset generators with safe default constants so the
 // fillers never need to nil-check on the hot path.
@@ -169,6 +180,42 @@ func (p *Profile) applyDefaults() {
 			K(0.8, "thread.name", "main", "worker", "gc", "http-handler", "grpc-worker", "scheduler", "io-poller"),
 			K(0.8, "thread.id", Int(1, 4096)),
 			K(0.3, "endpoint", "/api/v1/users", "/api/v1/orders", "/api/v1/search", "/api/v1/checkout", "/internal/health"),
+			K(0.15, "tenant.id", Int(1000, 9999).Prefix("tenant-")),
+		)
+	}
+	if p.MetricName == nil {
+		p.MetricName = Pool(
+			"http.server.duration",
+			"http.server.request.size",
+			"http.server.response.size",
+			"http.client.duration",
+			"rpc.server.duration",
+			"db.client.connections.usage",
+			"system.cpu.utilization",
+			"system.memory.usage",
+			"system.disk.io",
+			"system.network.io",
+			"process.runtime.jvm.memory.usage",
+			"process.runtime.go.goroutines",
+			"process.runtime.go.mem.heap_alloc",
+			"kafka.consumer.records_consumed_total",
+			"queue.size",
+			"app.orders.processed",
+		)
+	}
+	if p.MetricDescription == nil {
+		p.MetricDescription = Const("")
+	}
+	if p.MetricUnit == nil {
+		p.MetricUnit = Pool("1", "ms", "s", "By", "{count}")
+	}
+	if p.DataPointAttrs == nil {
+		p.DataPointAttrs = Map(
+			K(0.9, "http.method", "GET", "GET", "GET", "POST", "PUT", "DELETE"),
+			K(0.9, "http.status_code", "200", "200", "200", "201", "204", "400", "404", "500"),
+			K(0.7, "http.route", "/api/v1/users", "/api/v1/orders", "/api/v1/search", "/api/v1/checkout", "/internal/health"),
+			K(0.5, "net.protocol.name", "http", "grpc"),
+			K(0.3, "db.system", "postgresql", "mysql", "clickhouse", "redis"),
 			K(0.15, "tenant.id", Int(1000, 9999).Prefix("tenant-")),
 		)
 	}

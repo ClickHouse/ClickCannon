@@ -5,7 +5,7 @@
 A program for replaying OTel data into ClickHouse and simulating concurrent user queries against it. Four independent modes can be run in any combination:
 
 - **disk** — reads `.native`/`.native.zst` files from disk and feeds them to the insert workers
-- **generate** — generates synthetic OTel data (logs, traces, or profiles) from a code-defined profile and feeds it to the insert workers
+- **generate** — generates synthetic OTel data (logs, traces, profiles, or metrics) from a code-defined profile and feeds it to the insert workers
 - **insert** — inserts data into ClickHouse via ch-go
 - **user** — simulates concurrent users running parameterized queries against ClickHouse
 
@@ -79,6 +79,14 @@ generate:
     duration_min_ms: 1000
     duration_max_ms: 60000
     period_ns: 10000000
+  # Metric-specific settings (only used when data_type: metrics)
+  metrics:
+    points_per_series_min: 10
+    points_per_series_max: 120
+    point_interval_seconds: 15
+    histogram_buckets: 18
+    exp_histogram_buckets: 40
+    exp_histogram_scale: 3
 ```
 
 Adding a new generator profile means writing one Go file that calls `generate.RegisterProfile("name", builder)` from `init()`.
@@ -87,7 +95,9 @@ Generators available: `Pool/V`, `Const`, `RandStr(n).Prefix(p)`, `Hex(n).Prefix(
 
 When generating traces, each worker independently produces complete traces with correlated `TraceId`/`SpanId`/`ParentSpanId` hierarchies. When generating profiles, each worker produces whole profiles — many unique-stack sample rows sharing a `ProfileId`, timestamp, duration, period, and resource attributes — where each row carries a random-depth call stack (function/file/mapping names, addresses, line numbers) and per-sample attributes. All randomness is seeded from `app.seed` for reproducible runs.
 
-`profiles` is supported by the disk, generate, and insert pipelines only — the otel export sink does not support it.
+When generating metrics, each worker produces whole series — data points sharing a `MetricName`, `ServiceName`, resource/scope/datapoint attributes, and `StartTimeUnix`, with `TimeUnix` advancing by the collection interval. Set `app.metrics_type` to pick which OTel metrics table schema is produced (`gauge`, `sum`, `histogram`, `exponential_histogram`, or `summary`); one type is targeted per run. Sums are cumulative (mostly monotonic) counters, histogram bucket counts/sums/min/max are internally consistent, and exemplar columns are emitted empty.
+
+`profiles` and `metrics` are supported by the disk, generate, and insert pipelines only — the otel export sink does not support them.
 
 ## Disk (replay from files)
 
@@ -106,6 +116,11 @@ SELECT * FROM otel.otel_traces LIMIT 10000000 INTO OUTFILE 'trace_data/traces.na
 Export profiles:
 ```sql
 SELECT * FROM otel.otel_profiles LIMIT 10000000 INTO OUTFILE 'profile_data/profiles.native.zst' COMPRESSION 'zstd' FORMAT Native
+```
+
+Export metrics (one directory per metrics table; set `app.metrics_type` to match):
+```sql
+SELECT * FROM otel.otel_metrics_gauge LIMIT 10000000 INTO OUTFILE 'metrics_gauge_data/gauge.native.zst' COMPRESSION 'zstd' FORMAT Native
 ```
 
 You can split data across multiple files — each file becomes a unit of work for the disk reader threads.

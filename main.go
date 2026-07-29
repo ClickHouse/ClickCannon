@@ -94,6 +94,29 @@ func main() {
 			blockCreateFunc = func() block.SharedColumns {
 				return generate.NewGenProfilesColumns()
 			}
+		} else if cfg.App.DataType == app.ConfigDataTypeMetrics {
+			switch cfg.App.MetricsType {
+			case app.MetricsTypeGauge:
+				blockCreateFunc = func() block.SharedColumns {
+					return generate.NewGenMetricsGaugeColumns()
+				}
+			case app.MetricsTypeSum:
+				blockCreateFunc = func() block.SharedColumns {
+					return generate.NewGenMetricsSumColumns()
+				}
+			case app.MetricsTypeHistogram:
+				blockCreateFunc = func() block.SharedColumns {
+					return generate.NewGenMetricsHistogramColumns()
+				}
+			case app.MetricsTypeExponentialHistogram:
+				blockCreateFunc = func() block.SharedColumns {
+					return generate.NewGenMetricsExpHistogramColumns()
+				}
+			case app.MetricsTypeSummary:
+				blockCreateFunc = func() block.SharedColumns {
+					return generate.NewGenMetricsSummaryColumns()
+				}
+			}
 		}
 	} else {
 		// Disk mode: use decode-oriented column types
@@ -108,6 +131,29 @@ func main() {
 		} else if cfg.App.DataType == app.ConfigDataTypeProfiles {
 			blockCreateFunc = func() block.SharedColumns {
 				return block.NewProfilesSharedColumns()
+			}
+		} else if cfg.App.DataType == app.ConfigDataTypeMetrics {
+			switch cfg.App.MetricsType {
+			case app.MetricsTypeGauge:
+				blockCreateFunc = func() block.SharedColumns {
+					return block.NewMetricsGaugeSharedColumns()
+				}
+			case app.MetricsTypeSum:
+				blockCreateFunc = func() block.SharedColumns {
+					return block.NewMetricsSumSharedColumns()
+				}
+			case app.MetricsTypeHistogram:
+				blockCreateFunc = func() block.SharedColumns {
+					return block.NewMetricsHistogramSharedColumns()
+				}
+			case app.MetricsTypeExponentialHistogram:
+				blockCreateFunc = func() block.SharedColumns {
+					return block.NewMetricsExpHistogramSharedColumns()
+				}
+			case app.MetricsTypeSummary:
+				blockCreateFunc = func() block.SharedColumns {
+					return block.NewMetricsSummarySharedColumns()
+				}
 			}
 		}
 	}
@@ -131,13 +177,19 @@ func main() {
 	metricsCtx, cancelMetrics := context.WithCancel(context.Background())
 	var metricsWg sync.WaitGroup
 
+	// Include the metric sub-type in the run's data_type label (e.g. "metrics/gauge")
+	dataTypeLabel := cfg.App.DataType
+	if cfg.App.DataType == app.ConfigDataTypeMetrics {
+		dataTypeLabel += "/" + cfg.App.MetricsType
+	}
+
 	var metricsStore metrics.Store
 	if cfg.Metrics.Enabled {
 		runAttr := cfg.Metrics.Attributes
 		if runAttr == nil {
 			runAttr = make(map[string]string)
 		}
-		m, metricsErr := metrics.NewWorker(log, runID, runName, cfg.App.DataType, targetBytesPerSecond, cfg.Generate.RowsPerSecond, runAttr, &cfg.Metrics, blockPool, insertQueue)
+		m, metricsErr := metrics.NewWorker(log, runID, runName, dataTypeLabel, targetBytesPerSecond, cfg.Generate.RowsPerSecond, runAttr, &cfg.Metrics, blockPool, insertQueue)
 		if metricsErr != nil {
 			log.Error("failed to create metrics worker", "err", metricsErr)
 			return

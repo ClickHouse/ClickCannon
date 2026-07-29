@@ -28,6 +28,7 @@ type worker struct {
 	logsFiller     *LogsFiller
 	tracesFiller   *TracesFiller
 	profilesFiller *ProfilesFiller
+	metricsFiller  *MetricsFiller
 }
 
 func (w *worker) ID() int { return w.id }
@@ -80,6 +81,13 @@ func (w *worker) Run(ctx context.Context) error {
 				return fmt.Errorf("expected *GenProfilesColumns, got %T", cols)
 			}
 			rowsFilled = w.profilesFiller.Fill(ctx, w.rng, profileCols, w.rowsPerBlock)
+		case "metrics":
+			var fillErr error
+			rowsFilled, fillErr = w.metricsFiller.Fill(ctx, w.rng, cols, w.rowsPerBlock)
+			if fillErr != nil {
+				w.blockPool.Release(cols)
+				return fillErr
+			}
 		}
 
 		// Partial fill from cancellation — discard the block

@@ -9,8 +9,11 @@ app:
   log_level: debug
   log_to_console: true
   log_to_file: false
-  # Determines the data type being read/inserted for the test. One of: logs, traces, profiles
+  # Determines the data type being read/inserted for the test. One of: logs, traces, profiles, metrics
   data_type: traces
+  # Only used when data_type is metrics. Selects which OTel metrics table schema is used.
+  # One of: gauge, sum, histogram, exponential_histogram, summary
+  # metrics_type: gauge
   # A seed for the test. Will be used with random number generation for reproducible tests.
   seed: "some string"
 
@@ -73,6 +76,22 @@ generate:
     # Sampling period in nanoseconds
     period_ns: 10000000
 
+  # Metric-specific settings (only used when data_type: metrics)
+  metrics:
+    # Number of data points per series (uniform random between min and max).
+    # All points in a series share MetricName, ServiceName, resource/scope/datapoint
+    # attributes, and StartTimeUnix; TimeUnix advances by point_interval_seconds.
+    points_per_series_min: 10
+    points_per_series_max: 120
+    # Seconds between consecutive points in a series (the OTel collection interval)
+    point_interval_seconds: 15
+    # Number of explicit bucket bounds per series (metrics_type: histogram)
+    histogram_buckets: 18
+    # Number of positive buckets per series (metrics_type: exponential_histogram)
+    exp_histogram_buckets: 40
+    # Scale for exponential histograms (metrics_type: exponential_histogram)
+    exp_histogram_scale: 3
+
 # Disk mode: replay pre-exported .native/.native.zst files (mutually exclusive with generate)
 disk:
   enabled: true
@@ -81,6 +100,13 @@ disk:
   logs_path: log_data
   traces_path: trace_data
   profiles_path: profile_data
+  # Paths for metrics data, one directory per metrics_type.
+  # Defaults shown; only the directory for the active metrics_type is read.
+  # metrics_gauge_path: metrics_gauge_data
+  # metrics_sum_path: metrics_sum_data
+  # metrics_histogram_path: metrics_histogram_data
+  # metrics_exp_histogram_path: metrics_exp_histogram_data
+  # metrics_summary_path: metrics_summary_data
   # Set to true if the logs files on disk were exported with TimestampTime present.
   has_timestamp_time: false
   # Blocks can be reused to reduce garbage in the program and improve throughput stability, but
@@ -142,11 +168,18 @@ insert:
     # One of: none, lz4, zstd, lz4hc
     # This will affect Insert Bytes metric
     compression:
-    # Database and tables to insert into
+    # Database and tables to insert into.
+    # Only the table for the active data_type (and metrics_type) is required.
     database: otel
     logs_table: otel_logs
     traces_table: otel_traces
     profiles_table: otel_profiles
+    # Metrics tables, one per metrics_type. Defaults shown.
+    # metrics_gauge_table: otel_metrics_gauge
+    # metrics_sum_table: otel_metrics_sum
+    # metrics_histogram_table: otel_metrics_histogram
+    # metrics_exp_histogram_table: otel_metrics_exponential_histogram
+    # metrics_summary_table: otel_metrics_summary
 
 
 # Settings related to exporting data as OTLP to an OpenTelemetry endpoint over gRPC.
@@ -155,6 +188,7 @@ insert:
 # sink (insert or otel) can consume the block queue at a time — if both are enabled,
 # insert is disabled and a warning is logged. Row data is passed through verbatim
 # (column values map straight to OTLP fields; no SDK enrichment).
+# Supports logs and traces only (not profiles or metrics).
 otel:
   enabled: false
   # OTLP/gRPC endpoint. A leading http:// / https:// / grpc:// scheme is optional;

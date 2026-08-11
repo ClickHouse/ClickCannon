@@ -1,0 +1,176 @@
+╔════════════════════════════════════════════════════════════════════╗
+║         ClickCannon 监控系统 - 命令速查卡                          ║
+╚════════════════════════════════════════════════════════════════════╝
+
+📍 工作目录
+─────────────────────────────────────────────────────────────────────
+cd /home/sunchanglong/go_project/src/ClickCannon
+
+
+🚀 启动服务
+─────────────────────────────────────────────────────────────────────
+# 1. 启动监控系统（Grafana）
+./start-monitoring.sh
+
+# 2. 启动压测（新终端）
+./clickcannon --config config.yaml
+
+# 或者用 Go 运行
+go run . --config config.yaml
+
+
+📊 查看监控
+─────────────────────────────────────────────────────────────────────
+# Web界面（推荐）
+浏览器打开: http://localhost:3000
+用户名: admin
+密码: admin
+
+# 命令行查询
+./check-metrics.sh
+
+# 手动查询运行记录
+clickhouse-client --host=10.160.152.186 --port=9000 \
+  --user=admin --password='V%t^ckmstB' \
+  --query="SELECT * FROM clickcannon.runs ORDER BY start_time DESC LIMIT 5"
+
+# 手动查询指标
+clickhouse-client --host=10.160.152.186 --port=9000 \
+  --user=admin --password='V%t^ckmstB' \
+  --query="SELECT metric_name, count() FROM clickcannon.perf GROUP BY metric_name"
+
+
+🛑 停止服务
+─────────────────────────────────────────────────────────────────────
+# 停止压测
+按 Ctrl+C
+
+# 停止监控
+docker-compose down
+
+# 停止并删除数据
+docker-compose down -v
+
+
+🔍 日志查看
+─────────────────────────────────────────────────────────────────────
+# 查看 Grafana 日志
+docker-compose logs grafana
+
+# 实时查看日志
+docker-compose logs -f grafana
+
+# 查看 ClickCannon 日志（如果后台运行）
+tail -f clickcannon.log
+
+
+🔧 维护操作
+─────────────────────────────────────────────────────────────────────
+# 重启 Grafana
+docker-compose restart grafana
+
+# 查看容器状态
+docker-compose ps
+
+# 查看 ClickHouse 监控表
+clickhouse-client --host=10.160.152.186 --port=9000 \
+  --user=admin --password='V%t^ckmstB' \
+  --query="SHOW TABLES FROM clickcannon"
+
+
+⚙️ 配置修改
+─────────────────────────────────────────────────────────────────────
+# 编辑压测配置
+vim config.yaml
+
+# 编辑 Grafana 配置
+vim docker-compose.yml
+
+# 修改数据源
+vim grafana-provisioning/datasources/clickhouse.yml
+
+
+🧪 测试验证
+─────────────────────────────────────────────────────────────────────
+# 测试 ClickHouse 连接
+telnet 10.160.152.186 9000
+
+# 测试 Grafana 可访问
+curl http://localhost:3000
+
+# 检查数据文件
+ls -lh log_data/100w.native.zst
+
+# 编译测试
+go build -o clickcannon .
+
+
+📁 重要文件
+─────────────────────────────────────────────────────────────────────
+config.yaml                  # 压测配置（核心）
+docker-compose.yml           # Grafana 部署
+grafana.json                 # Dashboard 定义
+QUICKSTART.md               # 快速开始指南
+MONITORING.md               # 监控详细文档
+监控系统部署完成.md          # 部署报告
+
+
+🎯 性能调优
+─────────────────────────────────────────────────────────────────────
+# 提高吞吐量（编辑 config.yaml）
+disk:
+  threads: 16
+  mb_per_second_limit: 20480
+
+insert:
+  threads: 16
+  batch_size: 200000
+
+# 降低资源使用
+disk:
+  threads: 4
+  mb_per_second_limit: 2048
+
+insert:
+  threads: 4
+  batch_size: 50000
+
+
+🆘 故障排查
+─────────────────────────────────────────────────────────────────────
+# Grafana 无法启动
+sudo netstat -tlnp | grep 3000    # 检查端口占用
+docker-compose logs grafana        # 查看日志
+
+# Dashboard 无数据
+./check-metrics.sh                 # 验证数据写入
+# 检查 config.yaml 中 metrics.enabled: true
+# 确认 Grafana 中选择了正确的 run_id
+
+# 压测速度慢
+# 1. 检查 mb_per_second_limit 是否过低
+# 2. 增加 threads 数量
+# 3. 增大 batch_size
+
+# ClickHouse 连接失败
+telnet 10.160.152.186 9000
+clickhouse-client --host=10.160.152.186 --query="SELECT 1"
+
+
+📞 快速帮助
+─────────────────────────────────────────────────────────────────────
+详细文档: cat QUICKSTART.md
+监控说明: cat MONITORING.md
+部署报告: cat 监控系统部署完成.md
+
+
+✅ 三步启动（最简流程）
+─────────────────────────────────────────────────────────────────────
+1. ./start-monitoring.sh              # 启动监控
+2. ./clickcannon --config config.yaml # 启动压测（新终端）
+3. 打开 http://localhost:3000         # 查看监控
+
+
+╔════════════════════════════════════════════════════════════════════╗
+║  💡 提示：此文件可打印或保存为桌面快捷方式                          ║
+╚════════════════════════════════════════════════════════════════════╝

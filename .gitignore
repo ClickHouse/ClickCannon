@@ -47,6 +47,6 @@ runloop.sh
 *.sql
 vendor/*
 .kiro/*
-docs/*
-scribe/*
+# docs/*
+# scribe/*
 grafana/*

@@ -19,7 +19,7 @@ Copy `example.yaml`, edit it for your environment, and enable the modes you want
 
 Run with Go:
 ```sh
-go run clickcannon --config my-config.yaml
+go run clickcannon --config config.yaml
 ```
 
 Or build a binary first:

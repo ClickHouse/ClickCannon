@@ -206,18 +206,56 @@ func main() {
 	var blockCreateFunc func() block.SharedColumns
 
 	if cfg.Generate.Enabled {
-		// Generate mode: use generate-specific column types with working Append
-		if cfg.App.DataType == app.ConfigDataTypeLogs {
-			blockCreateFunc = func() block.SharedColumns {
-				return generate.NewGenLogsColumns()
+		// Generate mode: check if custom fields configuration is used
+		if cfg.Generate.EnableCustomFields && cfg.Generate.ProfileConfigFile != "" {
+			// Load custom configuration to create appropriate columns
+			customConfig, err := generate.LoadCustomFieldsConfig(cfg.Generate.ProfileConfigFile)
+			if err != nil {
+				log.Error("failed to load custom fields config", "err", err)
+				return
 			}
-		} else if cfg.App.DataType == app.ConfigDataTypeTraces {
-			blockCreateFunc = func() block.SharedColumns {
-				return generate.NewGenTracesColumns()
+			
+			log.Info("using custom fields configuration",
+				"file", cfg.Generate.ProfileConfigFile,
+				"fields_count", len(customConfig.CustomFields))
+			
+			// Create factory function for dynamic columns
+			// Validate config first
+			testCols, err := generate.NewDynamicColumns(customConfig)
+			if err != nil {
+				log.Error("failed to create dynamic columns template", "err", err)
+				return
 			}
-		} else if cfg.App.DataType == app.ConfigDataTypeProfiles {
+			if testCols == nil {
+				log.Error("NewDynamicColumns returned nil")
+				return
+			}
+			
+			log.Info("validated custom fields configuration", "fields", len(customConfig.CustomFields))
+			
 			blockCreateFunc = func() block.SharedColumns {
-				return generate.NewGenProfilesColumns()
+				dynCols, err := generate.NewDynamicColumns(customConfig)
+				if err != nil {
+					log.Error("failed to create dynamic columns", "err", err)
+					// Return a placeholder to avoid nil
+					panic(fmt.Sprintf("failed to create dynamic columns: %v", err))
+				}
+				return dynCols
+			}
+		} else {
+			// Use traditional profile-based column types
+			if cfg.App.DataType == app.ConfigDataTypeLogs {
+				blockCreateFunc = func() block.SharedColumns {
+					return generate.NewGenLogsColumns()
+				}
+			} else if cfg.App.DataType == app.ConfigDataTypeTraces {
+				blockCreateFunc = func() block.SharedColumns {
+					return generate.NewGenTracesColumns()
+				}
+			} else if cfg.App.DataType == app.ConfigDataTypeProfiles {
+				blockCreateFunc = func() block.SharedColumns {
+					return generate.NewGenProfilesColumns()
+				}
 			}
 		}
 	} else {

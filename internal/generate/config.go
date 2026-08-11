@@ -17,6 +17,10 @@ type Config struct {
 	// "high_cardinality"). If empty, defaults to "otel_demo".
 	Profile string `yaml:"profile"`
 
+	// Custom fields configuration
+	EnableCustomFields  bool   `yaml:"enable_custom_fields"`
+	ProfileConfigFile   string `yaml:"profile_config_file"`
+
 	// Block pool settings
 	ReuseBlocks         bool `yaml:"reuse_blocks"`
 	BlockRetirementUses int  `yaml:"block_retirement_uses"`

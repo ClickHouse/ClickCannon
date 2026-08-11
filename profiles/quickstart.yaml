@@ -1,0 +1,42 @@
+# ClickCannon 快速开始配置
+# 最简单的自定义字段示例
+
+version: "1.0"
+data_type: logs
+base_profile: "otel_demo"
+
+# 添加 3 个简单的自定义字段
+custom_fields:
+  
+  # 用户 ID (UUID)
+  user_id:
+    type: string
+    generator:
+      type: uuid
+  
+  # 请求计数 (1-100 的随机整数)
+  request_count:
+    type: int64
+    generator:
+      type: int_range
+      min: 1
+      max: 100
+  
+  # 环境 (dev 或 prod)
+  environment:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: pool
+      values: ["dev", "prod"]
+      weights: [0.3, 0.7]  # 30% dev, 70% prod
+
+# 使用方法:
+# 1. 更新 config.yaml:
+#    generate:
+#      enable_custom_fields: true
+#      profile_config_file: "profiles/quickstart.yaml"
+# 
+# 2. 创建 ClickHouse 表 (添加上述 3 个字段)
+# 
+# 3. 运行: ./clickcannon -config config.yaml

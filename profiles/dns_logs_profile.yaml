@@ -1,0 +1,889 @@
+# DNS 日志数据生成配置
+# 对应表: cdns_log
+# 此配置文件定义了所有 DNS 日志字段的生成规则
+
+version: "1.0"
+data_type: logs
+# 不继承任何基础 Profile，使用纯自定义字段
+base_profile: ""
+
+custom_fields:
+  
+  # ===========================================================================
+  # 时间和网络基础字段
+  # ===========================================================================
+  
+  tnow:
+    type: int64
+    clickhouse_type: DateTime
+    generator:
+      type: timestamp
+      format: unix_sec
+      offset_sec: 0
+  
+  serverAddress:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: pool
+      values:
+        - "10.160.152.186"
+        - "10.160.152.187"
+        - "10.160.152.188"
+        - "10.160.152.189"
+        - "10.160.152.190"
+        - "192.168.1.53"
+        - "192.168.2.53"
+        - "172.16.0.53"
+      weights: [0.3, 0.2, 0.15, 0.15, 0.1, 0.04, 0.03, 0.03]
+  
+  clientAddress:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: ip_v4
+      format: dotted
+  
+  serverPort:
+    type: int32
+    clickhouse_type: LowCardinality(UInt16)
+    generator:
+      type: pool
+      values: [53, 5353, 853, 8053]
+      weights: [0.85, 0.05, 0.05, 0.05]
+  
+  clientPort:
+    type: int32
+    clickhouse_type: UInt16
+    generator:
+      type: int_range
+      min: 1024
+      max: 65535
+  
+  transport:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 1   # UDP
+          weight: 75
+        - value: 2   # TCP
+          weight: 20
+        - value: 3   # TLS
+          weight: 3
+        - value: 5   # HTTPS
+          weight: 2
+  
+  # ===========================================================================
+  # DNS 协议字段
+  # ===========================================================================
+  
+  dnsMessageId:
+    type: int32
+    clickhouse_type: UInt16
+    generator:
+      type: int_range
+      min: 0
+      max: 65535
+  
+  firstQueryName:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: pool
+      values:
+        # 常见域名
+        - "www.baidu.com"
+        - "www.google.com"
+        - "api.example.com"
+        - "cdn.cloudflare.com"
+        - "s3.amazonaws.com"
+        - "github.com"
+        - "stackoverflow.com"
+        - "www.taobao.com"
+        - "www.jd.com"
+        - "www.qq.com"
+        # 内网域名
+        - "internal.company.local"
+        - "db.internal.local"
+        - "cache.internal.local"
+        # 恶意域名示例
+        - "malicious-site.xyz"
+        - "phishing-example.cn"
+        - "suspicious-domain.tk"
+      weights: [0.15, 0.12, 0.10, 0.08, 0.07, 0.06, 0.05, 0.05, 0.04, 0.04,
+                0.08, 0.05, 0.03, 0.04, 0.02, 0.02]
+  
+  firstType:
+    type: int32
+    clickhouse_type: LowCardinality(UInt16)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 1      # A
+          weight: 50
+        - value: 28     # AAAA
+          weight: 25
+        - value: 5      # CNAME
+          weight: 10
+        - value: 15     # MX
+          weight: 5
+        - value: 16     # TXT
+          weight: 5
+        - value: 2      # NS
+          weight: 3
+        - value: 6      # SOA
+          weight: 2
+  
+  firstClass:
+    type: int32
+    clickhouse_type: LowCardinality(UInt16)
+    generator:
+      type: const
+      value: 1  # IN (Internet)
+  
+  hostId:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: pool
+      values:
+        - "dns-server-01"
+        - "dns-server-02"
+        - "dns-server-03"
+        - "dns-cache-01"
+        - "dns-cache-02"
+        - "dns-recursive-01"
+        - "dns-recursive-02"
+  
+  ipType:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 1  # IPv4
+          weight: 75
+        - value: 2  # IPv6
+          weight: 25
+  
+  # ===========================================================================
+  # 安全和策略字段
+  # ===========================================================================
+  
+  domainSecurityType:
+    type: int32
+    clickhouse_type: UInt8
+    generator:
+      type: weighted_pool
+      values:
+        - value: 0  # 正常
+          weight: 0
+        - value: 1  # 白域名
+          weight: 50
+        - value: 2  # 未知域名
+          weight: 5
+        - value: 3  # 恶意域名
+          weight: 40
+        - value: 4  # 内容类拦截
+          weight: 4
+        - value: 5  # 自定义拦截
+          weight: 1
+  
+  serverType:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 0  # 默认
+          weight: 10
+        - value: 1  # 缓存DNS
+          weight: 40
+        - value: 2  # 递归DNS
+          weight: 35
+        - value: 3  # 权威DNS
+          weight: 15
+  
+  qrSigFlags:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 0  # Query
+          weight: 50
+        - value: 1  # Response
+          weight: 50
+  
+  queryOpCode:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 0  # QUERY
+          weight: 95
+        - value: 1  # IQUERY
+          weight: 2
+        - value: 2  # STATUS
+          weight: 2
+        - value: 4  # NOTIFY
+          weight: 1
+  
+  queryFlags:
+    type: int32
+    clickhouse_type: UInt16
+    generator:
+      type: int_range
+      min: 0
+      max: 65535
+  
+  responseFlags:
+    type: int32
+    clickhouse_type: LowCardinality(UInt16)
+    generator:
+      type: int_range
+      min: 0
+      max: 32768
+  
+  # ===========================================================================
+  # EDNS 字段
+  # ===========================================================================
+  
+  queryEdnsVersion:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: const
+      value: 0  # EDNS0
+  
+  queryUdpSize:
+    type: int32
+    clickhouse_type: LowCardinality(UInt16)
+    generator:
+      type: pool
+      values: [512, 1024, 1232, 4096]
+      weights: [0.1, 0.2, 0.6, 0.1]
+  
+  queryOptRdata:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: random_string
+      length: 16
+      charset: hex
+      prefix: ""
+  
+  # ===========================================================================
+  # 包大小和延迟字段
+  # ===========================================================================
+  
+  querySize:
+    type: int32
+    clickhouse_type: LowCardinality(UInt16)
+    generator:
+      type: int_range
+      min: 32
+      max: 512
+  
+  responseSize:
+    type: int32
+    clickhouse_type: LowCardinality(UInt16)
+    generator:
+      type: int_range
+      min: 64
+      max: 4096
+  
+  responseDelay:
+    type: int64
+    clickhouse_type: UInt32
+    generator:
+      type: int_range
+      min: 1
+      max: 1000  # 毫秒
+  
+  responseRcode:
+    type: int32
+    clickhouse_type: LowCardinality(UInt16)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 0   # NOERROR
+          weight: 85
+        - value: 1   # FORMERR
+          weight: 2
+        - value: 2   # SERVFAIL
+          weight: 5
+        - value: 3   # NXDOMAIN
+          weight: 6
+        - value: 4   # NOTIMP
+          weight: 1
+        - value: 5   # REFUSED
+          weight: 1
+  
+  clientHoplimit:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: int_range
+      min: 32
+      max: 128
+  
+  # ===========================================================================
+  # DNSSEC 字段
+  # ===========================================================================
+  
+  qrDnssecFlag:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 0  # 无 DNSSEC
+          weight: 90
+        - value: 1  # 有 DNSSEC
+          weight: 10
+  
+  qrDnssecSignature:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: random_string
+      length: 64
+      charset: hex
+      prefix: "sig_"
+  
+  # ===========================================================================
+  
+  # ===========================================================================
+  # Proxy 和路由字段
+  # ===========================================================================
+  
+  forwardIp:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: ip_v4
+      format: dotted
+  
+  clientSubnet:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: pool
+      values:
+        - "192.168.0.0/24"
+        - "10.0.0.0/16"
+        - "172.16.0.0/20"
+        - "100.64.0.0/22"
+  
+  sourceNetMask:
+    type: int32
+    clickhouse_type: UInt8
+    generator:
+      type: pool
+      values: [24, 16, 20, 22, 28]
+      weights: [0.4, 0.3, 0.15, 0.1, 0.05]
+  
+  scopeNetMask:
+    type: int32
+    clickhouse_type: UInt8
+    generator:
+      type: pool
+      values: [24, 16, 20, 22]
+      weights: [0.4, 0.3, 0.2, 0.1]
+  
+  uid:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: random_string
+      length: 16
+      charset: hex
+      prefix: "uid_"
+  
+  localAddress:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: ip_v4
+      format: dotted
+  
+  localPort:
+    type: int64
+    clickhouse_type: LowCardinality(UInt64)
+    generator:
+      type: int_range
+      min: 1024
+      max: 65535
+  
+  proxyVersion:
+    type: int64
+    clickhouse_type: LowCardinality(UInt32)
+    generator:
+      type: pool
+      values: [1, 2]
+      weights: [0.3, 0.7]
+  
+  source:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: pool
+      values:
+        - "enterprise"
+        - "isp"
+        - "cloud"
+        - "mobile"
+        - "iot"
+        - "edge"
+  
+  uri:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: pool
+      values:
+        - "/dns-query"
+        - "/resolve"
+        - "/api/v1/dns"
+        - "/doh/query"
+  
+  method:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: pool
+      values: ["GET", "POST"]
+      weights: [0.3, 0.7]
+  
+  # ===========================================================================
+  # 安全威胁字段
+  # ===========================================================================
+  
+  severity:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 0  # 无威胁
+          weight: 85
+        - value: 1  # 低
+          weight: 8
+        - value: 2  # 中
+          weight: 4
+        - value: 3  # 高
+          weight: 2
+        - value: 4  # 严重
+          weight: 1
+  
+  policyid:
+    type: int64
+    clickhouse_type: LowCardinality(UInt64)
+    generator:
+      type: int_range
+      min: 1000
+      max: 9999
+  
+  action:
+    type: int32
+    clickhouse_type: LowCardinality(UInt8)
+    generator:
+      type: weighted_pool
+      values:
+        - value: 0  # 允许
+          weight: 85
+        - value: 1  # 阻止
+          weight: 10
+        - value: 2  # 告警
+          weight: 5
+  
+  isInternalFQN:
+    type: int32
+    clickhouse_type: UInt8
+    generator:
+      type: weighted_pool
+      values:
+        - value: 0  # 外网
+          weight: 70
+        - value: 1  # 内网
+          weight: 30
+  
+  nodeId:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: pool
+      values:
+        - "node-beijing-01"
+        - "node-shanghai-01"
+        - "node-guangzhou-01"
+        - "node-shenzhen-01"
+        - "node-edge-01"
+        - "node-edge-02"
+  
+  channel:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: pool
+      values:
+        - "direct"
+        - "proxy"
+        - "vpn"
+        - "cdn"
+  
+  filterType:
+    type: int64
+    clickhouse_type: UInt64
+    generator:
+      type: int_range
+      min: 0
+      max: 100
+  
+  realAction:
+    type: int64
+    clickhouse_type: UInt32
+    generator:
+      type: int_range
+      min: 0
+      max: 255
+  
+  group:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: pool
+      values:
+        - "APT28"
+        - "Lazarus"
+        - "FIN7"
+        - "Carbanak"
+        - "Unknown"
+        - ""
+      weights: [0.19, 0.1, 0.2, 0.2, 0.3, 0.01]
+  
+  family:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: pool
+      values:
+        - "Emotet"
+        - "TrickBot"
+        - "Ryuk"
+        - "Dridex"
+        - ""
+      weights: [0.19, 0.3, 0.2, 0.3, 0.01]
+  
+  operation:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: pool
+      values:
+        - "C2 Communication"
+        - "Data Exfiltration"
+        - "Phishing"
+        - "DGA"
+        - "DNS Tunneling"
+        - ""
+      weights: [0.19, 0.1, 0.2, 0.2, 0.3, 0.01]
+  
+  maliciousType:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: pool
+      values:
+        - "malware"
+        - "phishing"
+        - "botnet"
+        - "c2"
+        - "dga"
+        - ""
+      weights: [0.19, 0.1, 0.2, 0.2, 0.3, 0.01]
+  
+  ioc:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: random_string
+      length: 32
+      charset: hex
+      prefix: "ioc_"
+
+# ===========================================================================
+# 注意事项
+# ===========================================================================
+# 
+# 1. 数组字段暂不支持:
+#    - otherQueries.*
+#    - responseAnswerRrs.*
+#    - responseAuthorityRrs.*
+#    - responseAdditionalRrs.*
+#    - xForwardIp
+#    - contentTags
+#    
+#    这些字段需要在 Phase 2 实现数组类型支持，或暂时使用空值
+# 
+# 2. MATERIALIZED 字段:
+#    - domain 字段是 MATERIALIZED，由 ClickHouse 自动计算，不需要生成
+# 
+# 3. 使用方法:
+#    a. 确保 ClickHouse 表结构与字段匹配
+#    b. 在 config.yaml 中配置:
+#       generate:
+#         enable_custom_fields: true
+#         profile_config_file: "profiles/dns_logs_profile.yaml"
+#    c. 运行: ./clickcannon -config config.yaml
+
+
+  # ===========================================================================
+  # Phase 2: 数组字段支持
+  # ===========================================================================
+  
+  responseAnswerRrs.name:
+    type: array_string
+    clickhouse_type: Array(String)
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 3
+      elements:
+        type: pool
+        values:
+          - "www.example.com"
+          - "api.example.com"
+          - "cdn.example.com"
+          - "mail.example.com"
+  
+  responseAnswerRrs.class:
+    type: array_uint16
+    clickhouse_type: Array(LowCardinality(UInt16))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 3
+      elements:
+        type: const
+        value: 1  # IN class
+  
+  responseAnswerRrs.type:
+    type: array_uint16
+    clickhouse_type: Array(LowCardinality(UInt16))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 3
+      elements:
+        type: pool
+        values: [1, 28, 5, 15]  # A, AAAA, CNAME, MX
+        weights: [0.6, 0.2, 0.15, 0.05]
+  
+  responseAnswerRrs.ttl:
+    type: array_uint32
+    clickhouse_type: Array(LowCardinality(UInt32))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 3
+      elements:
+        type: pool
+        values: [60, 300, 3600, 86400]
+        weights: [0.1, 0.3, 0.5, 0.1]
+  
+  responseAnswerRrs.rdata:
+    type: array_string
+    clickhouse_type: Array(String)
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 3
+      elements:
+        type: ip_v4
+        format: dotted
+  
+  contentTags:
+    type: array_string
+    clickhouse_type: Array(String)
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 5
+      elements:
+        type: pool
+        values:
+          - "adult"
+          - "gambling"
+          - "malware"
+          - "social"
+          - "news"
+          - "shopping"
+          - ""
+        weights: [0.02, 0.02, 0.03, 0.1, 0.1, 0.15, 0.58]
+  
+  xForwardIp:
+    type: array_string
+    clickhouse_type: Array(String)
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 2
+      elements:
+        type: ip_v4
+        format: dotted
+  
+  # otherQueries arrays
+  otherQueries.name:
+    type: array_string
+    clickhouse_type: Array(String)
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 2
+      elements:
+        type: pool
+        values:
+          - "sub.example.com"
+          - "alt.example.com"
+  
+  otherQueries.class:
+    type: array_uint16
+    clickhouse_type: Array(LowCardinality(UInt16))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 2
+      elements:
+        type: const
+        value: 1
+  
+  otherQueries.type:
+    type: array_uint16
+    clickhouse_type: Array(LowCardinality(UInt16))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 2
+      elements:
+        type: pool
+        values: [1, 28]
+        weights: [0.7, 0.3]
+  
+  # responseAuthorityRrs arrays
+  responseAuthorityRrs.name:
+    type: array_string
+    clickhouse_type: Array(String)
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 2
+      elements:
+        type: pool
+        values:
+          - "ns1.example.com"
+          - "ns2.example.com"
+  
+  responseAuthorityRrs.class:
+    type: array_uint16
+    clickhouse_type: Array(LowCardinality(UInt16))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 2
+      elements:
+        type: const
+        value: 1
+  
+  responseAuthorityRrs.type:
+    type: array_uint16
+    clickhouse_type: Array(LowCardinality(UInt16))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 2
+      elements:
+        type: const
+        value: 2  # NS type
+  
+  responseAuthorityRrs.ttl:
+    type: array_uint32
+    clickhouse_type: Array(LowCardinality(UInt32))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 2
+      elements:
+        type: const
+        value: 3600
+  
+  responseAuthorityRrs.rdata:
+    type: array_string
+    clickhouse_type: Array(String)
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 2
+      elements:
+        type: ip_v4
+        format: dotted
+  
+  # responseAdditionalRrs arrays
+  responseAdditionalRrs.name:
+    type: array_string
+    clickhouse_type: Array(String)
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 1
+      elements:
+        type: const
+        value: ""
+  
+  responseAdditionalRrs.class:
+    type: array_uint16
+    clickhouse_type: Array(LowCardinality(UInt16))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 1
+      elements:
+        type: const
+        value: 1
+  
+  responseAdditionalRrs.type:
+    type: array_uint16
+    clickhouse_type: Array(LowCardinality(UInt16))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 1
+      elements:
+        type: const
+        value: 41  # OPT type
+  
+  responseAdditionalRrs.ttl:
+    type: array_uint32
+    clickhouse_type: Array(LowCardinality(UInt32))
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 1
+      elements:
+        type: const
+        value: 0
+  
+  responseAdditionalRrs.rdata:
+    type: array_string
+    clickhouse_type: Array(String)
+    is_array: true
+    array_config:
+      min_size: 0
+      max_size: 1
+      elements:
+        type: const
+        value: ""

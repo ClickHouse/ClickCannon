@@ -4269,23 +4269,21 @@
           "value": "runs",
           "selected": false
         },
-        "hide": 0,
+        "hide": 2,
         "includeAll": false,
         "label": "Run Table",
         "multi": false,
         "name": "run_table",
-        "options": [],
+        "options": [
+          {
+            "selected": true,
+            "text": "runs",
+            "value": "runs"
+          }
+        ],
         "skipUrlSync": false,
-        "type": "query",
-        "datasource": {
-          "type": "grafana-clickhouse-datasource",
-          "uid": "${DS_GRAFANA-CLICKHOUSE-DATASOURCE}"
-        },
-        "definition": "SELECT name FROM system.tables WHERE database = '${database}'",
-        "query": "SELECT name FROM system.tables WHERE database = '${database}'",
-        "refresh": 1,
-        "regex": "",
-        "sort": 0
+        "type": "constant",
+        "query": "runs"
       },
       {
         "current": {
@@ -4293,23 +4291,21 @@
           "value": "perf",
           "selected": false
         },
-        "hide": 0,
+        "hide": 2,
         "includeAll": false,
         "label": "Perf Table",
         "multi": false,
         "name": "perf_table",
-        "options": [],
+        "options": [
+          {
+            "selected": true,
+            "text": "perf",
+            "value": "perf"
+          }
+        ],
         "skipUrlSync": false,
-        "type": "query",
-        "datasource": {
-          "type": "grafana-clickhouse-datasource",
-          "uid": "${DS_GRAFANA-CLICKHOUSE-DATASOURCE}"
-        },
-        "definition": "SELECT name FROM system.tables WHERE database = '${database}'",
-        "query": "SELECT name FROM system.tables WHERE database = '${database}'",
-        "refresh": 1,
-        "regex": "",
-        "sort": 0
+        "type": "constant",
+        "query": "perf"
       },
       {
         "current": {
@@ -4455,7 +4451,7 @@
       "30d"
     ]
   },
-  "timezone": "utc",
+  "timezone": "browser",
   "title": "ClickCannon",
   "uid": null,
   "version": 1,

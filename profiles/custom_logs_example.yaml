@@ -1,0 +1,261 @@
+# ClickCannon 自定义字段配置示例
+# 此文件展示如何通过配置文件添加自定义字段，无需修改代码
+
+version: "1.0"
+data_type: logs  # logs, traces, profiles
+base_profile: "otel_demo"  # 继承现有的 otel_demo Profile
+
+# ============================================================================
+# 自定义字段定义
+# ============================================================================
+custom_fields:
+  
+  # -------------------------------------------------------------------------
+  # 示例 1: UUID 字段
+  # -------------------------------------------------------------------------
+  user_id:
+    type: string              # 字段类型: string, int64, int32, float64, bool, map
+    clickhouse_type: String   # ClickHouse 列类型 (可选)
+    generator:
+      type: uuid              # 生成器类型: uuid
+  
+  # -------------------------------------------------------------------------
+  # 示例 2: 整数范围字段
+  # -------------------------------------------------------------------------
+  request_count:
+    type: int64
+    clickhouse_type: Int64
+    generator:
+      type: int_range         # 生成器类型: int_range
+      min: 1                  # 最小值
+      max: 10000              # 最大值
+  
+  # -------------------------------------------------------------------------
+  # 示例 3: 浮点数范围字段
+  # -------------------------------------------------------------------------
+  response_time_ms:
+    type: float64
+    clickhouse_type: Float64
+    generator:
+      type: float_range       # 生成器类型: float_range
+      min: 10.0
+      max: 5000.0
+      precision: 2            # 小数位数 (可选)
+  
+  # -------------------------------------------------------------------------
+  # 示例 4: 从池中选择 (带权重)
+  # -------------------------------------------------------------------------
+  environment:
+    type: string
+    clickhouse_type: LowCardinality(String)  # 低基数优化
+    generator:
+      type: pool              # 生成器类型: pool
+      values: ["dev", "staging", "prod"]
+      weights: [0.1, 0.2, 0.7]  # 权重分布 (可选): dev=10%, staging=20%, prod=70%
+  
+  # -------------------------------------------------------------------------
+  # 示例 5: 随机字符串字段
+  # -------------------------------------------------------------------------
+  request_id:
+    type: string
+    clickhouse_type: String
+    generator:
+      type: random_string     # 生成器类型: random_string
+      length: 16              # 字符串长度
+      charset: hex            # 字符集: hex, alphanumeric, alpha
+      prefix: "req_"          # 前缀 (可选)
+  
+  # -------------------------------------------------------------------------
+  # 示例 6: 十六进制字符串
+  # -------------------------------------------------------------------------
+  transaction_id:
+    type: string
+    generator:
+      type: hex               # 生成器类型: hex
+      length: 32              # 长度
+      prefix: "0x"            # 前缀 (可选)
+  
+  # -------------------------------------------------------------------------
+  # 示例 7: IP 地址
+  # -------------------------------------------------------------------------
+  client_ip:
+    type: string
+    generator:
+      type: ip_v4             # 生成器类型: ip_v4
+      format: dotted          # 格式: dotted (192.168.1.1), uint32, hex
+  
+  # -------------------------------------------------------------------------
+  # 示例 8: HTTP 方法 (带权重)
+  # -------------------------------------------------------------------------
+  http_method:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: pool
+      values: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+      weights: [0.5, 0.2, 0.1, 0.1, 0.1]  # GET=50%, POST=20%, 其他各10%
+  
+  # -------------------------------------------------------------------------
+  # 示例 9: 状态码 (离散值带权重)
+  # -------------------------------------------------------------------------
+  status_code:
+    type: int32
+    clickhouse_type: Int32
+    generator:
+      type: weighted_pool     # 生成器类型: weighted_pool
+      values:
+        - value: 200
+          weight: 70          # 70% 的请求返回 200
+        - value: 201
+          weight: 10
+        - value: 404
+          weight: 10
+        - value: 500
+          weight: 10
+  
+  # -------------------------------------------------------------------------
+  # 示例 10: Map 类型字段
+  # -------------------------------------------------------------------------
+  metadata:
+    type: map
+    clickhouse_type: Map(String, String)
+    generator:
+      type: map               # 生成器类型: map
+      keys:
+        # Key 1: region (100% 出现)
+        - key: region
+          probability: 1.0    # 出现概率 (0.0 - 1.0)
+          value_generator:
+            type: pool
+            values: ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"]
+        
+        # Key 2: instance_type (80% 出现)
+        - key: instance_type
+          probability: 0.8
+          value_generator:
+            type: pool
+            values: ["t3.micro", "t3.medium", "m5.large", "c5.xlarge"]
+        
+        # Key 3: availability_zone (90% 出现)
+        - key: availability_zone
+          probability: 0.9
+          value_generator:
+            type: pool
+            values: ["az-1a", "az-1b", "az-1c"]
+        
+        # Key 4: deployment_id (70% 出现，动态生成)
+        - key: deployment_id
+          probability: 0.7
+          value_generator:
+            type: random_string
+            length: 8
+            charset: hex
+            prefix: "deploy-"
+        
+        # Key 5: 固定值
+        - key: version
+          probability: 1.0
+          value_generator:
+            type: const
+            value: "v1.2.3"
+  
+  # -------------------------------------------------------------------------
+  # 示例 11: 时间戳字段
+  # -------------------------------------------------------------------------
+  event_timestamp:
+    type: int64
+    clickhouse_type: DateTime64(3)
+    generator:
+      type: timestamp         # 生成器类型: timestamp
+      format: unix_milli      # 格式: unix_milli, unix_nano, rfc3339
+      offset_ms: -3600000     # 时间偏移 (可选): -1小时 = -3600000ms
+  
+  # -------------------------------------------------------------------------
+  # 示例 12: 固定值字段
+  # -------------------------------------------------------------------------
+  app_version:
+    type: string
+    clickhouse_type: LowCardinality(String)
+    generator:
+      type: const             # 生成器类型: const
+      value: "2.5.1"
+
+# ============================================================================
+# 可选: 覆盖基础 Profile 的字段
+# ============================================================================
+override_fields:
+  
+  # 覆盖 ServiceName 字段
+  ServiceName:
+    generator:
+      type: pool
+      values: 
+        - "my-custom-api-gateway"
+        - "my-custom-auth-service"
+        - "my-custom-payment-service"
+        - "my-custom-user-service"
+        - "my-custom-notification-service"
+  
+  # 覆盖 Body 字段
+  Body:
+    generator:
+      type: pool
+      values:
+        - "Custom HTTP request completed"
+        - "Custom database query executed"
+        - "Custom cache operation completed"
+        - "Custom message published to queue"
+  
+  # 覆盖 SeverityText
+  SeverityText:
+    generator:
+      type: pool
+      values: ["INFO", "WARN", "ERROR"]
+      weights: [0.7, 0.2, 0.1]
+
+# ============================================================================
+# 配置说明
+# ============================================================================
+# 
+# 1. 字段类型 (type):
+#    - string: 字符串
+#    - int64: 64位整数
+#    - int32: 32位整数
+#    - float64: 64位浮点数
+#    - bool: 布尔值
+#    - map: Map(String, String)
+# 
+# 2. ClickHouse 类型 (clickhouse_type, 可选):
+#    - String: 普通字符串
+#    - LowCardinality(String): 低基数字符串 (高重复度时优化存储)
+#    - Int64, Int32, Float64: 数值类型
+#    - DateTime64(3): 毫秒精度时间戳
+#    - Map(String, String): Map 类型
+# 
+# 3. 生成器类型 (generator.type):
+#    - const: 固定值
+#    - pool: 从列表中随机选择
+#    - weighted_pool: 带权重的随机选择
+#    - uuid: UUID 生成
+#    - random_string: 随机字符串
+#    - hex: 十六进制字符串
+#    - int_range: 整数范围
+#    - float_range: 浮点数范围
+#    - ip_v4: IPv4 地址
+#    - timestamp: 时间戳
+#    - map: Map 类型
+# 
+# 4. 使用步骤:
+#    a. 复制此文件并修改字段定义
+#    b. 在 config.yaml 中启用:
+#       generate:
+#         enable_custom_fields: true
+#         profile_config_file: "profiles/custom_logs_example.yaml"
+#    c. 创建对应的 ClickHouse 表 (包含所有自定义字段)
+#    d. 运行: ./clickcannon -config config.yaml
+# 
+# 5. 注意事项:
+#    - 字段名区分大小写，建议使用 snake_case
+#    - ClickHouse 表必须包含所有自定义字段
+#    - 权重总和不必为 1.0，会自动归一化
+#    - Map 类型的 key 会根据 probability 动态添加

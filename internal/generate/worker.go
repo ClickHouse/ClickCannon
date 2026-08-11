@@ -28,6 +28,10 @@ type worker struct {
 	logsFiller     *LogsFiller
 	tracesFiller   *TracesFiller
 	profilesFiller *ProfilesFiller
+	
+	// Custom fields support
+	dynamicFiller *DynamicFiller
+	customConfig  *CustomFieldsConfig
 }
 
 func (w *worker) ID() int { return w.id }
@@ -55,31 +59,46 @@ func (w *worker) Run(ctx context.Context) error {
 		}
 
 		cols := w.blockPool.Acquire()
+		if cols == nil {
+			return fmt.Errorf("block pool returned nil")
+		}
 		cols.Reset()
 
 		var rowsFilled int
-		switch w.dataType {
-		case "logs":
-			logCols, ok := cols.(*GenLogsColumns)
+		
+		// Check if using custom fields configuration
+		if w.dynamicFiller != nil && w.customConfig != nil {
+			dynCols, ok := cols.(*DynamicColumns)
 			if !ok {
 				w.blockPool.Release(cols)
-				return fmt.Errorf("expected *GenLogsColumns, got %T", cols)
+				return fmt.Errorf("expected *DynamicColumns for custom config, got %T", cols)
 			}
-			rowsFilled = w.logsFiller.Fill(ctx, w.rng, logCols, w.rowsPerBlock)
-		case "traces":
-			traceCols, ok := cols.(*GenTracesColumns)
-			if !ok {
-				w.blockPool.Release(cols)
-				return fmt.Errorf("expected *GenTracesColumns, got %T", cols)
+			rowsFilled = w.dynamicFiller.Fill(ctx, w.rng, dynCols, w.rowsPerBlock)
+		} else {
+			// Use traditional profile-based fillers
+			switch w.dataType {
+			case "logs":
+				logCols, ok := cols.(*GenLogsColumns)
+				if !ok {
+					w.blockPool.Release(cols)
+					return fmt.Errorf("expected *GenLogsColumns, got %T", cols)
+				}
+				rowsFilled = w.logsFiller.Fill(ctx, w.rng, logCols, w.rowsPerBlock)
+			case "traces":
+				traceCols, ok := cols.(*GenTracesColumns)
+				if !ok {
+					w.blockPool.Release(cols)
+					return fmt.Errorf("expected *GenTracesColumns, got %T", cols)
+				}
+				rowsFilled = w.tracesFiller.Fill(ctx, w.rng, traceCols, w.rowsPerBlock)
+			case "profiles":
+				profileCols, ok := cols.(*GenProfilesColumns)
+				if !ok {
+					w.blockPool.Release(cols)
+					return fmt.Errorf("expected *GenProfilesColumns, got %T", cols)
+				}
+				rowsFilled = w.profilesFiller.Fill(ctx, w.rng, profileCols, w.rowsPerBlock)
 			}
-			rowsFilled = w.tracesFiller.Fill(ctx, w.rng, traceCols, w.rowsPerBlock)
-		case "profiles":
-			profileCols, ok := cols.(*GenProfilesColumns)
-			if !ok {
-				w.blockPool.Release(cols)
-				return fmt.Errorf("expected *GenProfilesColumns, got %T", cols)
-			}
-			rowsFilled = w.profilesFiller.Fill(ctx, w.rng, profileCols, w.rowsPerBlock)
 		}
 
 		// Partial fill from cancellation — discard the block

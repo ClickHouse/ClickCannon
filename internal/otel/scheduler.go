@@ -12,7 +12,8 @@ import (
 )
 
 // Scheduler manages the OTLP exporter worker goroutines. Each worker consumes
-// blocks from the shared queue, converts them to OTLP, and exports over gRPC.
+// blocks from the shared queue, converts them to OTLP, and exports them over the
+// configured protocol (gRPC or HTTP).
 type Scheduler struct {
 	log       *slog.Logger
 	workerLog *slog.Logger
@@ -43,7 +44,7 @@ func NewScheduler(
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {
-	s.log.Info("started", "threads", s.cfg.Threads, "url", s.cfg.URL, "batch_size", s.cfg.BatchSize)
+	s.log.Info("started", "threads", s.cfg.Threads, "protocol", s.cfg.Protocol, "url", s.cfg.URL, "batch_size", s.cfg.BatchSize)
 
 	var wg sync.WaitGroup
 	for i := range s.cfg.Threads {

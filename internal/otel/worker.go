@@ -2,6 +2,7 @@ package otel
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"time"
@@ -23,7 +24,7 @@ type batch interface {
 	len() int
 	// flush exports the accumulated rows and returns the wire size and row
 	// count sent. The batch is NOT reset on error so the caller can decide.
-	flush(ctx context.Context, c *client) (bytesSent, rows int, err error)
+	flush(ctx context.Context, c exporter) (bytesSent, rows int, err error)
 	// reset clears the accumulated rows.
 	reset()
 }
@@ -47,7 +48,7 @@ func (lb *logsBatch) addBlock(blk block.SharedColumns) {
 
 func (lb *logsBatch) len() int { return lb.b.len() }
 
-func (lb *logsBatch) flush(ctx context.Context, c *client) (int, int, error) {
+func (lb *logsBatch) flush(ctx context.Context, c exporter) (int, int, error) {
 	req := lb.b.build()
 	size := proto.Size(req)
 	rows := lb.b.len()
@@ -78,7 +79,7 @@ func (tb *tracesBatch) addBlock(blk block.SharedColumns) {
 
 func (tb *tracesBatch) len() int { return tb.b.len() }
 
-func (tb *tracesBatch) flush(ctx context.Context, c *client) (int, int, error) {
+func (tb *tracesBatch) flush(ctx context.Context, c exporter) (int, int, error) {
 	req := tb.b.build()
 	size := proto.Size(req)
 	rows := tb.b.len()
@@ -143,13 +144,13 @@ func (w *worker) drainRelease() {
 func (w *worker) Run(ctx context.Context) error {
 	w.log.Info("started")
 
-	c, err := dial(w.cfg)
+	c, err := dial(w.cfg, w.dataType)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if closeErr := c.close(); closeErr != nil {
-			w.log.Debug("failed to close grpc client", "err", closeErr)
+			w.log.Debug("failed to close export client", "err", closeErr)
 		}
 	}()
 
@@ -162,13 +163,21 @@ func (w *worker) Run(ctx context.Context) error {
 		baseFlushBackoff = 250 * time.Millisecond
 		maxFlushBackoff  = 5 * time.Second
 		maxFlushAttempts = 5
+		// maxRetryAfter caps how long a server-supplied Retry-After can stall a
+		// worker. Collectors under backpressure may ask for minutes; waiting that
+		// long would block the queue and starve the source, so honor the hint only
+		// up to this bound.
+		maxRetryAfter = 20 * time.Second
 	)
 
 	// flush exports the current batch (if any) and records metrics. Transient
 	// export failures are retried in place with backoff so a briefly-unavailable
-	// endpoint does not discard already-converted rows or tear down the gRPC
+	// endpoint does not discard already-converted rows or tear down the
 	// connection. The batch is dropped (bounded data loss) only after exhausting
 	// retries or on shutdown; the worker keeps running either way.
+	//
+	// OTelBytesTotal records the uncompressed marshaled request size, so the
+	// figure stays comparable across protocols and compression settings.
 	flush := func(fctx context.Context) {
 		if b.len() == 0 {
 			return
@@ -192,13 +201,22 @@ func (w *worker) Run(ctx context.Context) error {
 				b.reset()
 				return
 			}
-			w.log.Debug("export failed, retrying", "attempt", attempt, "backoff", backoff, "err", ferr)
+			// An OTLP/HTTP endpoint under backpressure answers 429/503 with a
+			// Retry-After hint; prefer it over our own schedule when it asks for a
+			// longer (bounded) wait.
+			wait := backoff
+			var ra *retryAfterError
+			if errors.As(ferr, &ra) {
+				wait = max(wait, min(ra.after, maxRetryAfter))
+			}
+
+			w.log.Debug("export failed, retrying", "attempt", attempt, "backoff", wait, "err", ferr)
 			select {
 			case <-fctx.Done():
 				w.log.Warn("export failed, dropping batch on shutdown", "rows", b.len(), "err", ferr)
 				b.reset()
 				return
-			case <-time.After(backoff):
+			case <-time.After(wait):
 			}
 			backoff = min(backoff*2, maxFlushBackoff)
 		}

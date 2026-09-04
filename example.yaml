@@ -149,7 +149,7 @@ insert:
     profiles_table: otel_profiles
 
 
-# Settings related to exporting data as OTLP to an OpenTelemetry endpoint over gRPC.
+# Settings related to exporting data as OTLP to an OpenTelemetry endpoint.
 # When enabled, the exporter consumes the same generated/replayed blocks the insert
 # workers would and sends them as OTLP instead of inserting into ClickHouse. Only one
 # sink (insert or otel) can consume the block queue at a time — if both are enabled,
@@ -157,12 +157,22 @@ insert:
 # (column values map straight to OTLP fields; no SDK enrichment).
 otel:
   enabled: false
-  # OTLP/gRPC endpoint. A leading http:// / https:// / grpc:// scheme is optional;
-  # http:// implies plaintext.
+  # Transport: grpc (default) or http. http sends protobuf-encoded bodies
+  # (OTLP "http/protobuf") to /v1/logs or /v1/traces.
+  protocol: grpc
+  # OTLP endpoint. Collectors listen on 4317 for grpc and 4318 for http.
+  #
+  #   protocol: grpc — a host:port target. A leading http:// / https:// / grpc://
+  #     scheme is optional and stripped; http:// implies plaintext.
+  #   protocol: http — a base URL, e.g. http://localhost:4318. The per-signal path
+  #     (/v1/logs or /v1/traces) is appended automatically when the URL has no path;
+  #     a URL that already has one (e.g. https://vendor.example.com/otlp/v1/logs) is
+  #     used verbatim. A missing scheme defaults to https:// (http:// if insecure).
   url: localhost:4317
-  # Disable transport security (plaintext gRPC). Set true for a local collector.
+  # Disable transport security: plaintext gRPC, or a http:// default scheme for the
+  # http protocol. Set true for a local collector.
   insecure: true
-  # Concurrent exporter workers (one gRPC connection each).
+  # Concurrent exporter workers (one connection each).
   threads: 4
   # Rows accumulated across one or more blocks before an export is flushed. Not an
   # exact limit — a batch finishes on the block boundary that crosses this threshold.
@@ -171,9 +181,11 @@ otel:
   flush_interval: 1s
   # Per-export request timeout.
   timeout: 30s
-  # gRPC compression: none or gzip.
+  # Payload compression: none or gzip. For grpc this selects the gRPC compressor;
+  # for http it gzips the body and sets Content-Encoding: gzip.
   compression: gzip
-  # Optional gRPC metadata headers sent with every export (e.g. auth tokens).
+  # Optional headers sent with every export (e.g. auth tokens), carried as gRPC
+  # metadata or HTTP request headers depending on protocol.
   headers:
     # authorization: "Bearer <token>"
 

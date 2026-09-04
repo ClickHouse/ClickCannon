@@ -5,7 +5,7 @@
 ### New Features
 
 - **Profiles support** — A new `profiles` data type joins `logs` and `traces` across the disk, generate, and insert pipelines. Set `app.data_type: profiles` to replay pre-exported profile `.native` files (`disk.profiles_path`), generate synthetic profiles (each row a sample with a random-depth call stack, configurable via `generate.profiles`), and insert into a profiles table (`insert.clickhouse.profiles_table`).
-- **OTel exporter** - Added experimental support for an OpenTelemetry OTLP exporter for disk/generated data.
+- **OTel exporter** - Added experimental support for an OpenTelemetry OTLP exporter for disk/generated data. Both OTLP transports are supported via `otel.protocol`: `grpc` (default) and `http` (protobuf body, per-signal `/v1/logs` and `/v1/traces` paths appended automatically, gzip via `Content-Encoding`, and `Retry-After` honored on `429`/`503`).
 
 ## v0.4.0
 

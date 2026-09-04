@@ -11,6 +11,8 @@ A program for replaying OTel data into ClickHouse and simulating concurrent user
 
 `disk` and `generate` are mutually exclusive data sources — enable one or the other. Each mode is independently toggled via `enabled` in the config. You can run `generate` + `insert` to load synthetic data, `disk` + `insert` to replay existing data, or `user` alone against an already-populated table.
 
+An experimental **otel** sink can replace `insert`, sending the same data to an OpenTelemetry endpoint as OTLP over gRPC or HTTP instead of into ClickHouse — see [OTel export](#otel-export-experimental).
+
 ([development blog post](https://clickhouse.com/blog/building-clickcannon-a-tool-for-benchmark-clickhouse))
 
 # Usage
@@ -87,7 +89,7 @@ Generators available: `Pool/V`, `Const`, `RandStr(n).Prefix(p)`, `Hex(n).Prefix(
 
 When generating traces, each worker independently produces complete traces with correlated `TraceId`/`SpanId`/`ParentSpanId` hierarchies. When generating profiles, each worker produces whole profiles — many unique-stack sample rows sharing a `ProfileId`, timestamp, duration, period, and resource attributes — where each row carries a random-depth call stack (function/file/mapping names, addresses, line numbers) and per-sample attributes. All randomness is seeded from `app.seed` for reproducible runs.
 
-`profiles` is supported by the disk, generate, and insert pipelines only — the otel export sink does not support it.
+`profiles` is supported by the disk, generate, and insert pipelines only — the [otel export sink](#otel-export-experimental) does not support it.
 
 ## Disk (replay from files)
 
@@ -109,6 +111,51 @@ SELECT * FROM otel.otel_profiles LIMIT 10000000 INTO OUTFILE 'profile_data/profi
 ```
 
 You can split data across multiple files — each file becomes a unit of work for the disk reader threads.
+
+# OTel export (experimental)
+
+The `otel` sink is an alternative to `insert`: it consumes the same blocks the insert workers would (from `disk` or `generate`) and exports them as OTLP to an OpenTelemetry endpoint instead of writing to ClickHouse. Only one sink can consume the block queue — if both `insert` and `otel` are enabled, `otel` wins and insert is disabled with a warning.
+
+Row data is passed through verbatim: column values map straight onto OTLP fields with no SDK enrichment. Supported for `logs` and `traces`; `profiles` is not supported by this sink.
+
+Two transports are available via `otel.protocol`:
+
+**gRPC** (default, collector port 4317):
+```yaml
+otel:
+  enabled: true
+  protocol: grpc
+  url: localhost:4317
+  insecure: true
+  threads: 4
+  batch_size: 10000
+  compression: gzip
+```
+
+**HTTP** (protobuf body, collector port 4318):
+```yaml
+otel:
+  enabled: true
+  protocol: http
+  url: http://localhost:4318
+  threads: 4
+  batch_size: 10000
+  compression: gzip
+```
+
+Endpoint resolution differs per protocol:
+
+| | `protocol: grpc` | `protocol: http` |
+|---|---|---|
+| `url` form | `host:port` target | base URL or full URL |
+| Scheme | optional, stripped (`http://` implies plaintext) | defaults to `https://`, or `http://` when `insecure: true` |
+| Path | n/a | `/v1/logs` or `/v1/traces` appended when `url` has no path; a URL that already has one is used verbatim |
+| `compression: gzip` | gRPC compressor | gzipped body + `Content-Encoding: gzip` |
+| `headers` | gRPC metadata | HTTP request headers |
+
+Set `url` to a full path when a vendor exposes per-signal endpoints, e.g. `https://otlp.vendor.example.com/otlp/v1/logs`.
+
+Failed exports are retried in place with exponential backoff (5 attempts) before the batch is dropped; a batch is bounded data loss, and the worker keeps running. Over HTTP, a `429`/`503` carrying `Retry-After` is honored up to a 20s cap so a backpressured collector cannot stall a worker indefinitely.
 
 # Memory Management
 

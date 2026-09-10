@@ -178,10 +178,85 @@ otel:
     # authorization: "Bearer <token>"
 
 
+# Settings related to the OTLP metrics generator/exporter. Self-contained:
+# it synthesizes OTLP metrics and exports them over gRPC to an OTel collector,
+# independent of the disk/generate to insert pipeline and app.data_type.
+# Each sweep of a virtual clock emits one point per active series at
+# start_time + sweep*interval; the rate limit decouples virtual time from
+# wall time. Series identity (labels, resources, bounds, quantiles) derives
+# from fixed seeds and is stable across runs; app.seed only varies values.
+metric_gen:
+  enabled: false
+  # OTLP/gRPC endpoint. http:// implies plaintext; insecure forces it.
+  url: localhost:4317
+  insecure: true
+  # gRPC compression: none or gzip.
+  compression: gzip
+  # Optional gRPC metadata headers sent with every export (e.g. auth tokens).
+  headers:
+    # authorization: "Bearer <token>"
+  # Per-export request deadline.
+  timeout: 30s
+  # Concurrent workers (one gRPC connection each); the series space is striped across them.
+  threads: 4
+  # Data points per export request. Mind the receiver's 4 MiB default gRPC message limit.
+  points_per_request: 4000
+  # Total data point rate across all workers. 0 = unlimited.
+  points_per_second: 250000
+  # Max time a partially-filled request waits before being flushed.
+  flush_interval: 1s
+
+  # Number of unique metric names, taken from a fixed lookup table.
+  metric_count: 1000
+  # Optional explicit metric names; overrides the lookup table and forces metric_count to the list length.
+  # metric_names: ["http.server.requests", "system.cpu.utilization"]
+  # Optional per-metric types, parallel to metric_names: gauge | sum | histogram | exponential_histogram | summary.
+  # metric_types: ["histogram", "gauge"]
+  # Optional exact series count per metric (each >= 1), parallel to metric_names; bypasses the decay curve below.
+  # metric_cardinalities: [100, 50]
+  # Series per metric follows exponential decay y = m * b^x, where x is the metric's 1-based index (min 1 series).
+  cardinality_m: 1000
+  cardinality_b: 0.99
+  # Data point attribute dimensions per metric, deterministic within [min, max]. min >= 1, max <= 16.
+  attributes_per_metric_min: 2
+  attributes_per_metric_max: 5
+  # Simulated resource pool (think pods); each series is pinned to one resource and its attributes. Keep <= ~100k.
+  resources: 1000
+  # Distinct service.name values across the resource pool. 0 = resources/20.
+  services: 0
+
+  # Virtual scrape interval: each sweep advances series timestamps by this.
+  interval: 15s
+  # Virtual clock anchor: "now", "now-<duration>" (backfill), or RFC3339.
+  start_time: now
+  # Stop after this many sweeps (points per series). 0 = run until stopped.
+  sweeps: 0
+  # Share one timestamp per sweep. Default false staggers each resource with a stable phase offset.
+  aligned_timestamps: false
+  # Per-point timestamp wobble (+/- ms), like real scrape jitter. Must be < interval/2.
+  timestamp_jitter_ms: 150
+  # Virtual time before a resource restarts with new series identities and reset counters. 0 = no churn.
+  resource_lifetime: 0s
+  # Emit NoRecordedValue marker points for series of churned-out resources. Requires resource_lifetime.
+  staleness_markers: false
+
+  # Fraction of sum/histogram/exp-histogram metrics using delta temporality; the rest are cumulative.
+  delta_ratio: 0.25
+  # Per-point probability of attaching an exemplar (sum/histogram/exp only).
+  exemplar_probability: 0.001
+  # Metric type mix: weighted round-robin across the name table, interleaved across cardinalities.
+  type_weights:
+    gauge: 30
+    sum: 30
+    histogram: 20
+    exponential_histogram: 10
+    summary: 10
+
 # Settings related to the program's read/insert metrics
 metrics:
   enabled: true
   # ClickHouse DSN URL, same format as OTel exporter.
+  # Optional when the otlp exporter below is enabled: empty DSN means OTLP export only.
   clickhouse_dsn: tcp://localhost:9000
 
   # Database and tables for capturing performance metrics.
@@ -195,6 +270,26 @@ metrics:
   attributes:
     env: "dev"
     foo: "bar"
+
+  # Optional OTLP exporter for the self-metrics, additive to the ClickHouse
+  # perf sink above. Each interval exports the current state in one request:
+  # `*_total` counters as cumulative monotonic Sums, gauges as Gauges, and
+  # sample points as Gauge points with their own timestamps/attributes.
+  # Resource attributes: service.name=clickcannon, service.instance.id=<run id>,
+  # clickcannon.run_name=<run name>, plus the `attributes` map above.
+  otlp:
+    enabled: false
+    # OTLP/gRPC endpoint. http://, https://, or grpc:// schemes are stripped; http:// implies insecure.
+    url: localhost:4317
+    # Disables transport security (plaintext gRPC).
+    insecure: true
+    # gRPC compression: "none" (default) or "gzip".
+    compression: none
+    # Optional gRPC metadata sent with every export (e.g. auth tokens).
+    #headers:
+    #  authorization: "Bearer token"
+    # How often the metric state is exported. Default 15s, minimum 1s.
+    interval: 15s
 
 # Settings related to user/query benchmarking
 user:

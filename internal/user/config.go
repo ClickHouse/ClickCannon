@@ -79,16 +79,16 @@ type WorkflowConfig interface {
 }
 
 type QueriesWorkflowConfig struct {
-	Random           bool                   `yaml:"random"`
-	ThinkTime        ThinkTimeConfig        `yaml:"think_time"`
-	TimeAnchor       TimeAnchor             `yaml:"time_anchor"`
-	DefaultTimeRange *TimeRangeConfig       `yaml:"default_time_range"`
-	DefaultSettings  map[string]string      `yaml:"default_settings"`
-	TimeRangeCadence  TimeRangeCadence        `yaml:"time_range_cadence"`
-	Vars              map[string]string       `yaml:"vars"`
-	PreflightQueries  []PreflightQueryConfig  `yaml:"preflight_queries"`
-	PreflightCadence  WorkflowPreflightCadence `yaml:"preflight_cadence"`
-	Queries          []QueryConfig          `yaml:"queries"`
+	Random           bool                     `yaml:"random"`
+	ThinkTime        ThinkTimeConfig          `yaml:"think_time"`
+	TimeAnchor       TimeAnchor               `yaml:"time_anchor"`
+	DefaultTimeRange *TimeRangeConfig         `yaml:"default_time_range"`
+	DefaultSettings  map[string]string        `yaml:"default_settings"`
+	TimeRangeCadence TimeRangeCadence         `yaml:"time_range_cadence"`
+	Vars             map[string]string        `yaml:"vars"`
+	PreflightQueries []PreflightQueryConfig   `yaml:"preflight_queries"`
+	PreflightCadence WorkflowPreflightCadence `yaml:"preflight_cadence"`
+	Queries          []QueryConfig            `yaml:"queries"`
 }
 
 func (QueriesWorkflowConfig) workflowConfig() {}
@@ -294,7 +294,7 @@ type TimeRangeConfig struct {
 	Round time.Duration `yaml:"round"`
 
 	// Fixed
-	Lookback time.Duration `yaml:"value"`
+	Lookback time.Duration `yaml:"lookback"`
 
 	// Uniform
 	Min time.Duration `yaml:"min"`

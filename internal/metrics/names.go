@@ -41,6 +41,17 @@ const (
 	GenerateBlocksTotal     Name = "generate_blocks_total"
 	GenerateRowsWorkerTotal Name = "generate_rows_worker_total"
 
+	// Metric generator (OTLP metrics export) counters
+
+	MetricGenPointsTotal        Name = "metricgen_points_total"
+	MetricGenRequestsTotal      Name = "metricgen_requests_total"
+	MetricGenBytesTotal         Name = "metricgen_bytes_total" // marshaled OTLP request size sent over the wire
+	MetricGenExportsFailedTotal Name = "metricgen_exports_failed_total"
+
+	// Per-worker metric generator counters (attribute: worker_id)
+	MetricGenPointsWorkerTotal Name = "metricgen_points_worker_total"
+	MetricGenSweepsWorkerTotal Name = "metricgen_sweeps_worker_total"
+
 	// Per-worker disk read counters (attribute: worker_id)
 	DiskRowsWorkerTotal              Name = "disk_rows_worker_total"
 	DiskBytesCompressedWorkerTotal   Name = "disk_bytes_compressed_worker_total"
@@ -75,11 +86,14 @@ const (
 	TargetGenerateRowsPerSecond Name = "target_generate_rows_per_second"
 	TargetWorkerBytesPerSecond  Name = "target_worker_bytes_per_second"
 
-	ActiveGenerators    Name = "active_generators"
-	ActiveReaders       Name = "active_readers"
-	ActiveInserters     Name = "active_inserters"
-	ActiveOTelExporters Name = "active_otel_exporters"
-	ActiveUsers         Name = "active_users"
+	TargetMetricGenPointsPerSecond Name = "target_metricgen_points_per_second"
+
+	ActiveGenerators       Name = "active_generators"
+	ActiveReaders          Name = "active_readers"
+	ActiveInserters        Name = "active_inserters"
+	ActiveOTelExporters    Name = "active_otel_exporters"
+	ActiveMetricGenWorkers Name = "active_metricgen_workers"
+	ActiveUsers            Name = "active_users"
 
 	BlockPoolCount    Name = "block_pool_count"
 	BlockPoolCapacity Name = "block_pool_capacity"
@@ -95,5 +109,6 @@ const (
 
 	// Samples
 
-	QueryLatencyMicros Name = "query_latency_micros"
+	QueryLatencyMicros     Name = "query_latency_micros"
+	PreflightLatencyMicros Name = "preflight_latency_micros"
 )

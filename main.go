@@ -6,6 +6,7 @@ import (
 	"clickcannon/internal/disk"
 	"clickcannon/internal/generate"
 	"clickcannon/internal/insert"
+	"clickcannon/internal/metricgen"
 	"clickcannon/internal/metrics"
 	otelexport "clickcannon/internal/otel"
 	"clickcannon/internal/user"
@@ -60,6 +61,7 @@ func main() {
 		"batch_size", cfg.Insert.BatchSize,
 		"otel_enabled", otelEnabled,
 		"otel_threads", cfg.OTel.Threads,
+		"metric_gen_enabled", cfg.MetricGen.Enabled,
 	)
 
 	// Determine source thread count for block pool sizing
@@ -210,6 +212,18 @@ func main() {
 		}
 	}
 
+	var metricGenWg sync.WaitGroup
+	metricGenCtx, cancelMetricGen := context.WithCancel(context.Background())
+	if cfg.MetricGen.Enabled {
+		mgs := metricgen.NewScheduler(log, &cfg.MetricGen, cfg.App.Seed, metricsStore)
+		metricGenWg.Go(func() {
+			mgsErr := mgs.Run(metricGenCtx)
+			if mgsErr != nil && !errors.Is(mgsErr, context.Canceled) {
+				log.Error("metric generator scheduler error", "err", mgsErr)
+			}
+		})
+	}
+
 	var userWg sync.WaitGroup
 	userCtx, cancelUser := context.WithCancel(context.Background())
 	if cfg.User.Enabled {
@@ -227,6 +241,7 @@ func main() {
 		sourceWg.Wait()
 		insertWg.Wait()
 		otelWg.Wait()
+		metricGenWg.Wait()
 		userWg.Wait()
 		close(done)
 	}()
@@ -243,6 +258,8 @@ func main() {
 	insertWg.Wait()
 	cancelOtel()
 	otelWg.Wait()
+	cancelMetricGen()
+	metricGenWg.Wait()
 	cancelUser()
 	userWg.Wait()
 	cancelMetrics()

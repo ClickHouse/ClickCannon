@@ -2,14 +2,15 @@
 
 # About
 
-A program for replaying OTel data into ClickHouse and simulating concurrent user queries against it. Four independent modes can be run in any combination:
+A program for replaying OTel data into ClickHouse and simulating concurrent user queries against it. Five independent modes can be run in any combination:
 
 - **disk** — reads `.native`/`.native.zst` files from disk and feeds them to the insert workers
 - **generate** — generates synthetic OTel data (logs, traces, or profiles) from a code-defined profile and feeds it to the insert workers
 - **insert** — inserts data into ClickHouse via ch-go
+- **metric_gen**: synthesizes OTLP metrics (all five types) and exports them over gRPC to an OTel collector endpoint
 - **user** — simulates concurrent users running parameterized queries against ClickHouse
 
-`disk` and `generate` are mutually exclusive data sources — enable one or the other. Each mode is independently toggled via `enabled` in the config. You can run `generate` + `insert` to load synthetic data, `disk` + `insert` to replay existing data, or `user` alone against an already-populated table.
+`disk` and `generate` are mutually exclusive data sources — enable one or the other. Each mode is independently toggled via `enabled` in the config. You can run `generate` + `insert` to load synthetic data, `disk` + `insert` to replay existing data, or `user` alone against an already-populated table. `metric_gen` is self-contained (it has its own generator and OTLP exporter) and can run alone or alongside `user`.
 
 ([development blog post](https://clickhouse.com/blog/building-clickcannon-a-tool-for-benchmark-clickhouse))
 
@@ -88,6 +89,31 @@ Generators available: `Pool/V`, `Const`, `RandStr(n).Prefix(p)`, `Hex(n).Prefix(
 When generating traces, each worker independently produces complete traces with correlated `TraceId`/`SpanId`/`ParentSpanId` hierarchies. When generating profiles, each worker produces whole profiles — many unique-stack sample rows sharing a `ProfileId`, timestamp, duration, period, and resource attributes — where each row carries a random-depth call stack (function/file/mapping names, addresses, line numbers) and per-sample attributes. All randomness is seeded from `app.seed` for reproducible runs.
 
 `profiles` is supported by the disk, generate, and insert pipelines only — the otel export sink does not support it.
+
+## Metric generator (OTLP metrics)
+
+The `metric_gen` mode is a self-contained OTLP metrics generator/exporter built to stress test the ClickHouse exporter's `metrics_schema: v2` pipeline. Instead of writing metric tables directly (which would duplicate the exporter's conversion logic), it emits OTLP over gRPC at a configurable rate and lets a real collector run the write path:
+
+```
+ClickCannon (metric_gen) ──OTLP/gRPC──▶ OTel Collector (clickhouseexporter, metrics_schema: v2) ──▶ ClickHouse
+```
+
+Three primary knobs control the workload:
+
+1. **Number of unique metrics** (`metric_count`): names come from a fixed lookup table (`adjective_adjective_noun`), stable across runs.
+2. **Cardinality per metric**: exponential decay `y = m * b^x` (`cardinality_m`, `cardinality_b`), where `x` is the metric's 1-based index in the table. A few head metrics carry most of the series; the tail is sparse.
+3. **Rate** (`points_per_second`): total data points per second across all workers.
+
+All five OTel metric types are generated (gauge, sum, histogram, exponential histogram, summary) with a configurable type mix, delta + cumulative temporality, monotonic and non-monotonic sums, int and double values, exemplars, and realistic resource/scope/point attributes. Series are pinned to a pool of simulated resources (pods) so resource attributes group like a real fleet, and optional `resource_lifetime` churn makes pods "restart" (new series identities) to stress the exporter's series cache.
+
+Generation is **stateless and deterministic**: every point is a pure function of (seed, metric, series, sweep), so hundreds of millions of series cost no generator memory. Cumulative counters are strictly monotonic within an epoch and reset deterministically. Metric names, label sets, bounds, and quantiles derive from fixed seeds; only point values vary with `app.seed`, so saved dashboards and query workloads survive re-runs.
+
+**Time model:** the generator works in *sweeps* over a virtual clock. Each sweep emits one point per series at `start_time + sweep*interval`; the rate limit controls how fast sweeps happen, decoupling virtual time from wall time. Two example shapes:
+
+- **Breadth** (millions of series): `metric_count: 1000`, `cardinality_m: 50000`, `cardinality_b: 0.99` gives about 4.9M series; every sweep writes one point per series.
+- **Depth** (millions of points per series): `metric_count: 50`, `cardinality_m: 20`, `cardinality_b: 1`, `interval: 1s`, `start_time: now-1440h`, `sweeps: 5000000`, unlimited rate backfills five million points per series as fast as the pipeline allows.
+
+See the `metric_gen` section of `example.yaml` for every option.
 
 ## Disk (replay from files)
 

@@ -4,6 +4,7 @@ import (
 	"clickcannon/internal/disk"
 	"clickcannon/internal/generate"
 	"clickcannon/internal/insert"
+	"clickcannon/internal/metricgen"
 	"clickcannon/internal/metrics"
 	"clickcannon/internal/otel"
 	"clickcannon/internal/user"
@@ -36,13 +37,14 @@ type Config struct {
 		Seed         string `yaml:"seed"`
 	} `yaml:"app"`
 
-	Pprof    PprofConfig     `yaml:"pprof"`
-	Disk     disk.Config     `yaml:"disk"`
-	Generate generate.Config `yaml:"generate"`
-	Insert   insert.Config   `yaml:"insert"`
-	OTel     otel.Config     `yaml:"otel"`
-	Metrics  metrics.Config  `yaml:"metrics"`
-	User     user.Config     `yaml:"user"`
+	Pprof     PprofConfig      `yaml:"pprof"`
+	Disk      disk.Config      `yaml:"disk"`
+	Generate  generate.Config  `yaml:"generate"`
+	Insert    insert.Config    `yaml:"insert"`
+	OTel      otel.Config      `yaml:"otel"`
+	MetricGen metricgen.Config `yaml:"metric_gen"`
+	Metrics   metrics.Config   `yaml:"metrics"`
+	User      user.Config      `yaml:"user"`
 }
 
 func (c Config) GetDataFolder() string {
@@ -76,7 +78,15 @@ func (c Config) IsLogsData() bool {
 }
 
 func (c Config) Validate() error {
-	if c.App.DataType == "" || (c.App.DataType != ConfigDataTypeLogs && c.App.DataType != ConfigDataTypeTraces && c.App.DataType != ConfigDataTypeProfiles) {
+	// data_type drives the block pipeline (disk/generate -> insert/otel). The
+	// metric_gen and user modes don't touch blocks, so a run using only those
+	// may omit it.
+	blockModesEnabled := c.Disk.Enabled || c.Generate.Enabled || c.Insert.Enabled || c.OTel.Enabled
+	if c.App.DataType == "" {
+		if blockModesEnabled {
+			return errors.New("app: data_type must be set (one of: logs, traces, profiles) when disk/generate/insert/otel modes are enabled")
+		}
+	} else if c.App.DataType != ConfigDataTypeLogs && c.App.DataType != ConfigDataTypeTraces && c.App.DataType != ConfigDataTypeProfiles {
 		return errors.New("app: data_type must be one of: logs, traces, profiles")
 	}
 
@@ -102,6 +112,10 @@ func (c Config) Validate() error {
 
 	if err := c.OTel.Validate(); err != nil {
 		return fmt.Errorf("otel: %w", err)
+	}
+
+	if err := c.MetricGen.Validate(); err != nil {
+		return fmt.Errorf("metric_gen: %w", err)
 	}
 
 	if err := c.Metrics.Validate(); err != nil {

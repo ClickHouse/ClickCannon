@@ -32,6 +32,9 @@ func fnvStr(h uint64, s string) uint64 {
 // fnvKVs folds key/value pairs into the running hash, in stored order. Rows that
 // share identical attributes (in the same column order) produce identical hashes,
 // which is how records are grouped into a single Resource/Scope.
+//
+// STILL USED BY THE LOGS BUILDER (convert_logs.go). The TRACES builder uses the
+// order-INSENSITIVE hashKVSet below instead: see its comment for why.
 func fnvKVs(h uint64, kvs []block.KV) uint64 {
 	for _, kv := range kvs {
 		h = fnvStr(h, kv.Key)
@@ -40,6 +43,49 @@ func fnvKVs(h uint64, kvs []block.KV) uint64 {
 		h = (h ^ 0x1e) * fnvPrime64
 	}
 	return h
+}
+
+// fnvKVPair hashes ONE key/value pair to a standalone digest. The delimiters are
+// the same ones fnvKVs uses, so a given pair contributes the same bits in both
+// schemes; only the way pairs are COMBINED differs.
+func fnvKVPair(kv block.KV) uint64 {
+	h := fnvStr(fnvOffset64, kv.Key)
+	h = (h ^ 0x1f) * fnvPrime64
+	h = fnvStr(h, kv.Value)
+	return (h ^ 0x1e) * fnvPrime64
+}
+
+// mix64 is splitmix64's finaliser, used as a second accumulator independent of xor.
+func mix64(x uint64) uint64 {
+	x ^= x >> 30
+	x *= 0xbf58476d1ce4e5b9
+	x ^= x >> 27
+	x *= 0x94d049bb133111eb
+	x ^= x >> 31
+	return x
+}
+
+// kvSetHash is an order-insensitive fingerprint of a kv set: xor, a
+// sum-of-mixed accumulator, and the pair count are compared together so
+// reordered attrs hash equal while collisions stay unlikely. Needed because Go
+// map iteration order is random, and an order-sensitive hash was splitting one
+// resource into per-span groups (~4x wire inflation).
+type kvSetHash struct {
+	xor uint64
+	sum uint64
+	n   uint32
+}
+
+// hashKVSet computes the order-insensitive fingerprint of kvs. No allocation.
+func hashKVSet(kvs []block.KV) kvSetHash {
+	var out kvSetHash
+	for _, kv := range kvs {
+		h := fnvKVPair(kv)
+		out.xor ^= h
+		out.sum += mix64(h)
+		out.n++
+	}
+	return out
 }
 
 func stringValue(s string) *commonpb.AnyValue {

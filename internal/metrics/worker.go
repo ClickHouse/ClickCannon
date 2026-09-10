@@ -43,6 +43,10 @@ type Worker struct {
 	mu           sync.Mutex
 	metrics      map[metricKey]uint64
 	pointMetrics []Entry
+
+	// otlp is the optional OTLP exporter for the self-metrics, additive to the
+	// ClickHouse perf sink. Nil when disabled.
+	otlp *otlpEmitter
 }
 
 func NewWorker(log *slog.Logger, runID, configName, dataType string, targetBytesPerSecond, targetGenerateRowsPerSecond uint64, runAttr map[string]string, cfg *Config, blockPool block.Pool, blockQueue chan block.SharedColumns) (*Worker, error) {
@@ -60,6 +64,15 @@ func NewWorker(log *slog.Logger, runID, configName, dataType string, targetBytes
 		metricsQueue: make(chan Entry, 100_000),
 		metrics:      make(map[metricKey]uint64),
 		pointMetrics: make([]Entry, 0, 100_000),
+	}
+
+	if cfg.OTLP.Enabled {
+		emitter, err := newOTLPEmitter(w.log, cfg.OTLP, runID, configName, runAttr, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		w.otlp = emitter
+		w.log.Info("otlp export enabled", "url", cfg.OTLP.URL, "interval", emitter.interval)
 	}
 
 	if cfg.ClickHouseDSN != "" {
@@ -136,12 +149,24 @@ func (w *Worker) Run(ctx context.Context) error {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
+	// The OTLP exporter runs on its own interval; a nil channel never fires.
+	var otlpTickerC <-chan time.Time
+	if w.otlp != nil {
+		otlpTicker := time.NewTicker(w.otlp.interval)
+		defer otlpTicker.Stop()
+		otlpTickerC = otlpTicker.C
+		defer w.otlp.close()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case m := <-w.metricsQueue:
 			w.applyMetricEntry(m)
+		case <-otlpTickerC:
+			w.collectInternalMetrics()
+			w.otlp.export(ctx, w.snapshotCumulative())
 		case <-ticker.C:
 			w.collectInternalMetrics()
 
@@ -180,6 +205,9 @@ func (w *Worker) applyMetricEntry(m Entry) {
 		w.metrics[key] = m.Value
 	case EntryModePoint:
 		w.pointMetrics = append(w.pointMetrics, m)
+		if w.otlp != nil {
+			w.otlp.addSample(m)
+		}
 	}
 }
 
@@ -242,6 +270,17 @@ func (w *Worker) snapshotAndReset() (map[metricKey]uint64, []Entry) {
 	}
 
 	return snapshot, pointSnapshot
+}
+
+// snapshotCumulative copies the current cumulative/gauge metric state without
+// clearing anything. Sample points are buffered separately by the OTLP emitter.
+func (w *Worker) snapshotCumulative() map[metricKey]uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	snapshot := make(map[metricKey]uint64, len(w.metrics))
+	maps.Copy(snapshot, w.metrics)
+	return snapshot
 }
 
 func (w *Worker) resetMetrics() {

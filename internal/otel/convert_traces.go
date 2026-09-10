@@ -8,29 +8,39 @@ import (
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 )
 
+// tracesGroupKey identifies one (resource, scope) group: scalar folds the
+// service/scope identity fields in fixed order, res is the order-insensitive
+// resource attribute fingerprint (kvSetHash, convert.go). Both fields must
+// match, so a collision in one alone can't merge two different groups.
+type tracesGroupKey struct {
+	scalar uint64
+	res    kvSetHash
+}
+
 // tracesBuilder groups spans by (resource, scope) fingerprint into OTLP
 // ResourceSpans.
 type tracesBuilder struct {
-	groups map[uint64]*tracepb.ResourceSpans
+	groups map[tracesGroupKey]*tracepb.ResourceSpans
 	order  []*tracepb.ResourceSpans
 	count  int
 }
 
 func newTracesBuilder() *tracesBuilder {
-	return &tracesBuilder{groups: make(map[uint64]*tracepb.ResourceSpans)}
+	return &tracesBuilder{groups: make(map[tracesGroupKey]*tracepb.ResourceSpans)}
 }
 
 func (b *tracesBuilder) len() int { return b.count }
 
 func (b *tracesBuilder) add(r *block.TraceRow) {
-	// See logsBuilder.add for the delimiter/collision rationale.
-	key := fnvStr(fnvOffset64, r.ServiceName)
-	key = (key ^ 0x01) * fnvPrime64
-	key = fnvKVs(key, r.ResourceAttrs)
-	key = (key ^ 0x2d) * fnvPrime64
-	key = fnvStr(key, r.ScopeName)
-	key = (key ^ 0x03) * fnvPrime64
-	key = fnvStr(key, r.ScopeVersion)
+	// See logsBuilder.add for the delimiter rationale. Resource attributes are
+	// hashed order-insensitively (kvSetHash, convert.go) because all spans of a
+	// trace carry the same attribute set in a random per-span order.
+	scalar := fnvStr(fnvOffset64, r.ServiceName)
+	scalar = (scalar ^ 0x2d) * fnvPrime64
+	scalar = fnvStr(scalar, r.ScopeName)
+	scalar = (scalar ^ 0x03) * fnvPrime64
+	scalar = fnvStr(scalar, r.ScopeVersion)
+	key := tracesGroupKey{scalar: scalar, res: hashKVSet(r.ResourceAttrs)}
 
 	rs := b.groups[key]
 	if rs == nil {

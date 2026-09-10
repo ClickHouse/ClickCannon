@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"strconv"
 	"time"
 )
 
@@ -110,7 +111,7 @@ func (b *QueriesWorkflow) NextQuery(ctx context.Context) (*ExecutableQuery, erro
 	}
 
 	if len(q.PreflightQueries) > 0 {
-		binds, err := b.execPreflights(ctx, params, q.PreflightQueries)
+		binds, err := b.execPreflights(ctx, q.Name, params, q.PreflightQueries)
 		if err != nil {
 			return nil, fmt.Errorf("preflight_queries for query (index=%d, name=%q): %w", queryIndex, q.Name, err)
 		}
@@ -187,7 +188,7 @@ func (b *QueriesWorkflow) getWorkloadBinds(ctx context.Context, params QueryPara
 	if len(b.cfg.PreflightQueries) > 0 {
 		params.Preflight = binds
 		var err error
-		binds, err = b.execPreflights(ctx, params, b.cfg.PreflightQueries)
+		binds, err = b.execPreflights(ctx, "workflow", params, b.cfg.PreflightQueries)
 		if err != nil {
 			return nil, err
 		}
@@ -202,8 +203,9 @@ func (b *QueriesWorkflow) getWorkloadBinds(ctx context.Context, params QueryPara
 }
 
 // execPreflights runs preflight queries in sequence, each receiving all binds accumulated so far.
-// Returns the full merged bind map (input binds + new results).
-func (b *QueriesWorkflow) execPreflights(ctx context.Context, params QueryParams, preflights []PreflightQueryConfig) (map[string]string, error) {
+// The scope names the owner for perf recording: the query name for query-level preflights or
+// "workflow" for workflow-level ones. Returns the full merged bind map (input binds + new results).
+func (b *QueriesWorkflow) execPreflights(ctx context.Context, scope string, params QueryParams, preflights []PreflightQueryConfig) (map[string]string, error) {
 	binds := make(map[string]string, len(params.Preflight)+len(preflights))
 	for k, v := range params.Preflight {
 		binds[k] = v
@@ -211,12 +213,18 @@ func (b *QueriesWorkflow) execPreflights(ctx context.Context, params QueryParams
 
 	for i, pf := range preflights {
 		params.Preflight = binds
+		start := time.Now()
 		result, err := b.queryRunner.ExecPreflight(ctx, pf.Binds, pf.SQL, pf.Settings, params.Params())
 		if err != nil {
 			b.metrics.IncrementMetric(metrics.PreflightsFailedTotal, 1)
 			return nil, fmt.Errorf("preflight_queries[%d]: %w", i, err)
 		}
 		b.metrics.IncrementMetric(metrics.PreflightsOkTotal, 1)
+		b.metrics.AddMetricPointWithAttributes(metrics.PreflightLatencyMicros, uint64(time.Since(start).Microseconds()), map[string]string{
+			"workflow_name":   b.name,
+			"preflight_scope": scope,
+			"preflight_index": strconv.Itoa(i),
+		})
 		for k, v := range result {
 			binds[k] = v
 		}

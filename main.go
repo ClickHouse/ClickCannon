@@ -79,7 +79,7 @@ func main() {
 	}
 
 	blocksToAlloc := (sourceThreads + consumerThreads) * 2
-	insertQueue := make(chan block.SharedColumns, blocksToAlloc)
+	var insertQueue chan block.SharedColumns
 	var blockCreateFunc func() block.SharedColumns
 
 	if cfg.Generate.Enabled {
@@ -115,16 +115,21 @@ func main() {
 	}
 
 	var blockPool block.Pool
-	if cfg.Generate.Enabled {
-		if cfg.Generate.ReuseBlocks {
-			blockPool = block.NewBlockPool(blocksToAlloc, cfg.Generate.BlockRetirementUses, blockCreateFunc)
+	if blockCreateFunc == nil {
+		blockPool = block.NewGarbageBlockPool(nil)
+	} else {
+		insertQueue = make(chan block.SharedColumns, blocksToAlloc)
+		if cfg.Generate.Enabled {
+			if cfg.Generate.ReuseBlocks {
+				blockPool = block.NewBlockPool(blocksToAlloc, cfg.Generate.BlockRetirementUses, blockCreateFunc)
+			} else {
+				blockPool = block.NewGarbageBlockPool(blockCreateFunc)
+			}
+		} else if cfg.Disk.ReuseBlocks {
+			blockPool = block.NewBlockPool(blocksToAlloc, cfg.Disk.BlockRetirementUses, blockCreateFunc)
 		} else {
 			blockPool = block.NewGarbageBlockPool(blockCreateFunc)
 		}
-	} else if cfg.Disk.ReuseBlocks {
-		blockPool = block.NewBlockPool(blocksToAlloc, cfg.Disk.BlockRetirementUses, blockCreateFunc)
-	} else {
-		blockPool = block.NewGarbageBlockPool(blockCreateFunc)
 	}
 
 	terminate := make(chan os.Signal, 1)
@@ -176,7 +181,7 @@ func main() {
 			}
 			close(insertQueue)
 		})
-	} else {
+	} else if insertQueue != nil {
 		close(insertQueue)
 	}
 

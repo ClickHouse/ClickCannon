@@ -8,38 +8,52 @@ import (
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 )
 
+// logsGroupKey identifies one (resource, scope) group: scalar folds the
+// string identity fields in fixed order, res and scope are order-insensitive
+// attribute fingerprints (kvSetHash, convert.go). All fields must match, so a
+// collision in one alone can't merge two different groups.
+type logsGroupKey struct {
+	scalar uint64
+	res    kvSetHash
+	scope  kvSetHash
+}
+
 // logsBuilder groups log records by (resource, scope) fingerprint into OTLP
 // ResourceLogs so records sharing a resource+scope are emitted together.
 type logsBuilder struct {
-	groups map[uint64]*logspb.ResourceLogs
+	groups map[logsGroupKey]*logspb.ResourceLogs
 	order  []*logspb.ResourceLogs
 	count  int
 }
 
 func newLogsBuilder() *logsBuilder {
-	return &logsBuilder{groups: make(map[uint64]*logspb.ResourceLogs)}
+	return &logsBuilder{groups: make(map[logsGroupKey]*logspb.ResourceLogs)}
 }
 
 func (b *logsBuilder) len() int { return b.count }
 
 func (b *logsBuilder) add(r *block.LogRow) {
-	// Fold a distinct delimiter after each scalar field so adjacent values with
-	// ambiguous boundaries ("ab"+"c" vs "a"+"bc") cannot collide. A residual
-	// 64-bit hash collision (~2^-64 per pair) would merge two groups; that is an
+	// Fold a distinct non-printable delimiter after each scalar field so
+	// adjacent values with ambiguous boundaries ("ab"+"c" vs "a"+"bc") cannot
+	// collide; printable delimiters would collide with the same byte appearing
+	// in the data. Attribute sets are hashed order-insensitively (kvSetHash,
+	// convert.go) because identical attr maps arrive in a random per-record
+	// order. A residual hash collision would merge two groups; that is an
 	// accepted tradeoff for a load generator (affects only grouping metadata).
-	key := fnvStr(fnvOffset64, r.ServiceName)
-	key = (key ^ 0x01) * fnvPrime64
-	key = fnvStr(key, r.ResourceSchemaURL)
-	key = (key ^ 0x02) * fnvPrime64
-	key = fnvKVs(key, r.ResourceAttrs)
-	key = (key ^ 0x2d) * fnvPrime64
-	key = fnvStr(key, r.ScopeName)
-	key = (key ^ 0x03) * fnvPrime64
-	key = fnvStr(key, r.ScopeVersion)
-	key = (key ^ 0x04) * fnvPrime64
-	key = fnvStr(key, r.ScopeSchemaURL)
-	key = (key ^ 0x05) * fnvPrime64
-	key = fnvKVs(key, r.ScopeAttrs)
+	scalar := fnvStr(fnvOffset64, r.ServiceName)
+	scalar = (scalar ^ 0x01) * fnvPrime64
+	scalar = fnvStr(scalar, r.ResourceSchemaURL)
+	scalar = (scalar ^ 0x02) * fnvPrime64
+	scalar = fnvStr(scalar, r.ScopeName)
+	scalar = (scalar ^ 0x03) * fnvPrime64
+	scalar = fnvStr(scalar, r.ScopeVersion)
+	scalar = (scalar ^ 0x04) * fnvPrime64
+	scalar = fnvStr(scalar, r.ScopeSchemaURL)
+	key := logsGroupKey{
+		scalar: scalar,
+		res:    hashKVSet(r.ResourceAttrs),
+		scope:  hashKVSet(r.ScopeAttrs),
+	}
 
 	rl := b.groups[key]
 	if rl == nil {

@@ -447,6 +447,7 @@ func TestValidateRejectsBadConfigs(t *testing.T) {
 		{"attributes max below min", func(c *Config) { c.AttributesPerMetricMin = 6; c.AttributesPerMetricMax = 3 }},
 		{"attributes max too large", func(c *Config) { c.AttributesPerMetricMax = maxAttrsPerMetric + 1 }},
 		{"staleness markers without churn", func(c *Config) { c.StalenessMarkers = true; c.ResourceLifetime = 0 }},
+		{"type_weights sum too large", func(c *Config) { c.TypeWeights = TypeWeights{Gauge: maxTypeWeightTotal + 1} }},
 		{"metric_types without metric_names", func(c *Config) { c.MetricTypes = []string{"gauge"} }},
 		{"metric_types length mismatch", func(c *Config) {
 			c.MetricNames = []string{"a.metric", "b.metric"}

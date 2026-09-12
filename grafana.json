@@ -5551,7 +5551,7 @@
                       }
                     ]
                   },
-                  "unit": "rowsps"
+                  "unit": "binBps"
                 },
                 "overrides": []
               },

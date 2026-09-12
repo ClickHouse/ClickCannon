@@ -180,6 +180,98 @@ func TestConvertTracesWithEventsAndLinks(t *testing.T) {
 	}
 }
 
+// kvs builds a KV slice from alternating key, value strings.
+func kvs(pairs ...string) []block.KV {
+	out := make([]block.KV, 0, len(pairs)/2)
+	for i := 0; i+1 < len(pairs); i += 2 {
+		out = append(out, block.KV{Key: pairs[i], Value: pairs[i+1]})
+	}
+	return out
+}
+
+// TestTracesGrouping checks the (resource, scope) group key: identical attr
+// sets merge regardless of insertion order, different identities split.
+func TestTracesGrouping(t *testing.T) {
+	mk := func(service, scope string, attrs []block.KV) block.TraceRow {
+		return block.TraceRow{
+			Timestamp:     time.Unix(1700000000, 0).UTC(),
+			TraceID:       "0123456789abcdef0123456789abcdef",
+			SpanID:        "0123456789abcdef",
+			SpanName:      "op",
+			ServiceName:   service,
+			ScopeName:     scope,
+			ScopeVersion:  "1.0",
+			ResourceAttrs: attrs,
+		}
+	}
+	base := kvs("host.name", "node-1", "region", "us-east", "env", "prod")
+	reordered := kvs("env", "prod", "host.name", "node-1", "region", "us-east")
+
+	tests := []struct {
+		name       string
+		a, b       block.TraceRow
+		wantGroups int
+	}{
+		{"reordered attrs merge", mk("svc", "scope", base), mk("svc", "scope", reordered), 1},
+		{"changed value splits", mk("svc", "scope", base), mk("svc", "scope", kvs("host.name", "node-2", "region", "us-east", "env", "prod")), 2},
+		{"swapped values split", mk("svc", "scope", kvs("a", "1", "b", "2")), mk("svc", "scope", kvs("a", "2", "b", "1")), 2},
+		{"empty vs non-empty splits", mk("svc", "scope", nil), mk("svc", "scope", kvs("a", "1")), 2},
+		{"hyphen boundary splits", mk("checkout-service", "otel", base), mk("checkout", "service-otel", base), 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newTracesBuilder()
+			b.add(&tt.a)
+			b.add(&tt.b)
+			if got := len(b.build().ResourceSpans); got != tt.wantGroups {
+				t.Fatalf("resource spans groups = %d, want %d", got, tt.wantGroups)
+			}
+		})
+	}
+}
+
+// TestLogsGrouping checks the (resource, scope) group key: identical attr sets
+// merge regardless of insertion order, different identities split.
+func TestLogsGrouping(t *testing.T) {
+	mk := func(service, scope string, res, scopeAttrs []block.KV) block.LogRow {
+		return block.LogRow{
+			Timestamp:     time.Unix(1700000000, 0).UTC(),
+			ServiceName:   service,
+			Body:          "msg",
+			ScopeName:     scope,
+			ScopeVersion:  "1.0",
+			ResourceAttrs: res,
+			ScopeAttrs:    scopeAttrs,
+		}
+	}
+	base := kvs("host.name", "node-1", "region", "us-east", "env", "prod")
+	reordered := kvs("env", "prod", "host.name", "node-1", "region", "us-east")
+
+	tests := []struct {
+		name       string
+		a, b       block.LogRow
+		wantGroups int
+	}{
+		{"reordered resource attrs merge", mk("svc", "scope", base, nil), mk("svc", "scope", reordered, nil), 1},
+		{"reordered scope attrs merge", mk("svc", "scope", base, kvs("a", "1", "b", "2")), mk("svc", "scope", reordered, kvs("b", "2", "a", "1")), 1},
+		{"changed value splits", mk("svc", "scope", base, nil), mk("svc", "scope", kvs("host.name", "node-2", "region", "us-east", "env", "prod"), nil), 2},
+		{"swapped values split", mk("svc", "scope", kvs("a", "1", "b", "2"), nil), mk("svc", "scope", kvs("a", "2", "b", "1"), nil), 2},
+		{"empty vs non-empty resource attrs splits", mk("svc", "scope", nil, nil), mk("svc", "scope", kvs("a", "1"), nil), 2},
+		{"empty vs non-empty scope attrs splits", mk("svc", "scope", base, nil), mk("svc", "scope", base, kvs("a", "1")), 2},
+		{"hyphen boundary splits", mk("checkout-service", "otel", base, nil), mk("checkout", "service-otel", base, nil), 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newLogsBuilder()
+			b.add(&tt.a)
+			b.add(&tt.b)
+			if got := len(b.build().ResourceLogs); got != tt.wantGroups {
+				t.Fatalf("resource logs groups = %d, want %d", got, tt.wantGroups)
+			}
+		})
+	}
+}
+
 func hasAttr(t *testing.T, attrs []*commonpb.KeyValue, key string) bool {
 	t.Helper()
 	for _, a := range attrs {

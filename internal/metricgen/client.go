@@ -94,8 +94,11 @@ func dial(cfg *Config) (*client, error) {
 	return c, nil
 }
 
-// export sends one pre-marshaled ExportMetricsServiceRequest.
-func (c *client) export(ctx context.Context, data preMarshaled) error {
+// export sends one pre-marshaled ExportMetricsServiceRequest. A partial
+// success response is a success per the OTLP spec and must not be retried;
+// the rejected point count and endpoint message are returned alongside a nil
+// error so the caller can account for them.
+func (c *client) export(ctx context.Context, data preMarshaled) (rejected int64, rejectMsg string, err error) {
 	if c.md != nil {
 		ctx = metadata.NewOutgoingContext(ctx, c.md)
 	}
@@ -106,12 +109,12 @@ func (c *client) export(ctx context.Context, data preMarshaled) error {
 	}
 	resp := &colmetricspb.ExportMetricsServiceResponse{}
 	if err := c.conn.Invoke(ctx, exportFullMethod, data, resp, grpc.ForceCodecV2(c.codec)); err != nil {
-		return err
+		return 0, "", err
 	}
 	if ps := resp.GetPartialSuccess(); ps != nil && ps.GetRejectedDataPoints() > 0 {
-		return fmt.Errorf("endpoint rejected %d data points: %s", ps.GetRejectedDataPoints(), ps.GetErrorMessage())
+		return ps.GetRejectedDataPoints(), ps.GetErrorMessage(), nil
 	}
-	return nil
+	return 0, "", nil
 }
 
 func (c *client) close() error {

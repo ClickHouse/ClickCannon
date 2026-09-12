@@ -36,7 +36,7 @@ func (b *tracesBuilder) add(r *block.TraceRow) {
 	// hashed order-insensitively (kvSetHash, convert.go) because all spans of a
 	// trace carry the same attribute set in a random per-span order.
 	scalar := fnvStr(fnvOffset64, r.ServiceName)
-	scalar = (scalar ^ 0x2d) * fnvPrime64
+	scalar = (scalar ^ 0x01) * fnvPrime64
 	scalar = fnvStr(scalar, r.ScopeName)
 	scalar = (scalar ^ 0x03) * fnvPrime64
 	scalar = fnvStr(scalar, r.ScopeVersion)

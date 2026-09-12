@@ -200,6 +200,10 @@ const (
 	defaultAttrsPerMetricMin = 2
 	defaultAttrsPerMetricMax = 5
 	maxAttrsPerMetric        = 16 // must stay <= len(attrKeyPool); Validate guards both
+
+	// maxTypeWeightTotal bounds the summed type weights: typeCycle allocates
+	// O(total) memory, and weights are ratios so large sums buy nothing.
+	maxTypeWeightTotal = 10000
 )
 
 var defaultTypeWeights = TypeWeights{Gauge: 30, Sum: 30, Histogram: 20, ExponentialHistogram: 10, Summary: 10}
@@ -331,6 +335,9 @@ func (c Config) Validate() error {
 	if c.TypeWeights.Gauge < 0 || c.TypeWeights.Sum < 0 || c.TypeWeights.Histogram < 0 ||
 		c.TypeWeights.ExponentialHistogram < 0 || c.TypeWeights.Summary < 0 {
 		return errors.New("type_weights must be non-negative")
+	}
+	if c.TypeWeights.total() > maxTypeWeightTotal {
+		return fmt.Errorf("type_weights must sum to <= %d (weights are ratios, so scale them down)", maxTypeWeightTotal)
 	}
 	if c.Sweeps < 0 {
 		return errors.New("sweeps must be >= 0")

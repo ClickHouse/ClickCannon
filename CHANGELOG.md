@@ -20,6 +20,13 @@
 ### Bug Fixes
 
 - **`fixed` time_range `lookback` key**: The fixed time range's duration was documented as `lookback` but the parser only accepted `value`. The parser now uses `lookback` as documented; configs using the old undocumented `value` key must be updated.
+- **Startup crash with `disk.reuse_blocks`**: Fixed a startup crash when `app.data_type` was omitted while `disk.reuse_blocks` was enabled.
+- **OTel trace grouping with hyphenated names**: Fixed span grouping that could merge distinct service/scope pairs when their names contained hyphens.
+- **OTel log export grouping**: Log records with identical resource attributes no longer split into separate groups on export.
+- **`metric_gen` OTLP partial-success handling**: `metric_gen` no longer retries points an OTLP partial-success response already rejected; rejected points are now counted in `metricgen_points_rejected_total`.
+- **`type_weights` totals**: `metric_gen.type_weights` totals are now capped instead of allowed to exceed valid bounds.
+- **Self-metrics OTLP export drops**: Self-metrics OTLP export no longer drops samples on skipped intervals, and now flushes once on shutdown.
+- **Metric Gen bytes panel unit**: Fixed the "Metric Gen OTLP Bytes/s" Grafana panel showing the wrong unit.
 
 ## v0.4.0
 

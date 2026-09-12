@@ -18,9 +18,13 @@ import (
 )
 
 // captureServer is an in-process OTLP/gRPC metrics endpoint that records every
-// export request.
+// export request. Set rejectPerRequest before traffic starts to answer every
+// request with an OTLP partial success.
 type captureServer struct {
 	colmetricspb.UnimplementedMetricsServiceServer
+	rejectPerRequest int64
+	rejectMessage    string
+
 	mu       sync.Mutex
 	requests []*colmetricspb.ExportMetricsServiceRequest
 }
@@ -29,7 +33,14 @@ func (s *captureServer) Export(_ context.Context, req *colmetricspb.ExportMetric
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requests = append(s.requests, req)
-	return &colmetricspb.ExportMetricsServiceResponse{}, nil
+	resp := &colmetricspb.ExportMetricsServiceResponse{}
+	if s.rejectPerRequest > 0 {
+		resp.PartialSuccess = &colmetricspb.ExportMetricsPartialSuccess{
+			RejectedDataPoints: s.rejectPerRequest,
+			ErrorMessage:       s.rejectMessage,
+		}
+	}
+	return resp, nil
 }
 
 func startCaptureServer(t *testing.T) (*captureServer, string) {
@@ -280,6 +291,87 @@ func TestExportEndToEnd(t *testing.T) {
 				t.Fatalf("metric %q series spans %dns, want %dns", name, maxTs-minTs, wantSpan)
 			}
 		}
+	}
+}
+
+// countingStore is a minimal in-memory metrics.Store for asserting counters.
+type countingStore struct {
+	mu     sync.Mutex
+	counts map[metrics.Name]uint64
+}
+
+func newCountingStore() *countingStore {
+	return &countingStore{counts: make(map[metrics.Name]uint64)}
+}
+
+func (s *countingStore) IncrementMetric(name metrics.Name, delta uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.counts[name] += delta
+}
+
+func (s *countingStore) IncrementMetricWithAttr(name metrics.Name, delta uint64, attrKey, attrValue string) {
+	s.IncrementMetric(name, delta)
+}
+
+func (s *countingStore) DecrementMetric(name metrics.Name, delta uint64) {}
+
+func (s *countingStore) SetMetric(name metrics.Name, value uint64) {}
+
+func (s *countingStore) GetMetric(name metrics.Name) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.counts[name]
+}
+
+func (s *countingStore) AddMetricPoint(name metrics.Name, value uint64) {}
+
+func (s *countingStore) AddMetricPointWithAttributes(name metrics.Name, value uint64, attributes map[string]string) {
+}
+
+// TestExportPartialSuccessNotRetried asserts the OTLP spec behavior: a partial
+// success response is a success. The request is delivered exactly once (no
+// retry re-sending accepted points), counts as exported, and the rejected
+// points land on their own counter.
+func TestExportPartialSuccessNotRetried(t *testing.T) {
+	capture, addr := startCaptureServer(t)
+	const rejectedPerRequest = 3
+	capture.rejectPerRequest = rejectedPerRequest
+	capture.rejectMessage = "attribute limit exceeded"
+
+	cfg := exportTestConfig(addr)
+	store := newCountingStore()
+	s := NewScheduler(slog.New(slog.DiscardHandler), &cfg, "test-seed", store)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := s.Run(ctx); err != nil {
+		t.Fatalf("scheduler: %v", err)
+	}
+
+	capture.mu.Lock()
+	requests := uint64(len(capture.requests))
+	capture.mu.Unlock()
+	if requests == 0 {
+		t.Fatal("no requests captured")
+	}
+
+	if got := store.GetMetric(metrics.MetricGenExportsFailedTotal); got != 0 {
+		t.Fatalf("partial success counted as %d failed exports, want 0", got)
+	}
+	// One server-side request per counted request: a retry would re-deliver
+	// the same payload and the server would see more requests than counted.
+	if got := store.GetMetric(metrics.MetricGenRequestsTotal); got != requests {
+		t.Fatalf("requests counter %d != %d requests received by server", got, requests)
+	}
+	total, _ := cfg.totalSeries()
+	if got, want := store.GetMetric(metrics.MetricGenPointsTotal), total*uint64(cfg.Sweeps); got != want {
+		t.Fatalf("points counter %d, want %d", got, want)
+	}
+	if got := store.GetMetric(metrics.MetricGenBytesTotal); got == 0 {
+		t.Fatal("bytes counter not recorded")
+	}
+	if got, want := store.GetMetric(metrics.MetricGenPointsRejectedTotal), requests*rejectedPerRequest; got != want {
+		t.Fatalf("rejected counter %d, want %d", got, want)
 	}
 }
 

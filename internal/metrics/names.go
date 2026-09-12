@@ -47,6 +47,9 @@ const (
 	MetricGenRequestsTotal      Name = "metricgen_requests_total"
 	MetricGenBytesTotal         Name = "metricgen_bytes_total" // marshaled OTLP request size sent over the wire
 	MetricGenExportsFailedTotal Name = "metricgen_exports_failed_total"
+	// MetricGenPointsRejectedTotal counts points rejected via OTLP partial
+	// success responses; the requests themselves succeeded and are not retried.
+	MetricGenPointsRejectedTotal Name = "metricgen_points_rejected_total"
 
 	// Per-worker metric generator counters (attribute: worker_id)
 	MetricGenPointsWorkerTotal Name = "metricgen_points_worker_total"

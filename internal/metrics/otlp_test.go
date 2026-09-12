@@ -242,6 +242,145 @@ func TestOTLPExportEndToEnd(t *testing.T) {
 	}
 }
 
+func TestOTLPExportSkipPreservesSamples(t *testing.T) {
+	capture, addr := startCaptureServer(t)
+
+	e, err := newOTLPEmitter(slog.New(slog.DiscardHandler), OTLPConfig{Enabled: true, URL: addr, Insecure: true}, "run-1", "cfg", nil, time.Now())
+	if err != nil {
+		t.Fatalf("newOTLPEmitter: %v", err)
+	}
+	defer e.close()
+
+	e.addSample(Entry{Mode: EntryModePoint, Name: QueryLatencyMicros, Value: 42, Timestamp: time.Now()})
+
+	// Previous export still in flight: the interval is skipped and the sample
+	// must stay buffered.
+	e.inFlight.Store(true)
+	e.export(context.Background(), nil)
+	if got := capture.snapshot(); len(got) != 0 {
+		t.Fatalf("skipped interval exported %d requests, want 0", len(got))
+	}
+	e.mu.Lock()
+	buffered := len(e.samples)
+	e.mu.Unlock()
+	if buffered != 1 {
+		t.Fatalf("buffered samples after skipped interval = %d, want 1", buffered)
+	}
+
+	// Next interval exports the preserved sample.
+	e.inFlight.Store(false)
+	e.export(context.Background(), nil)
+	deadline := time.Now().Add(10 * time.Second)
+	var requests []*colmetricspb.ExportMetricsServiceRequest
+	for time.Now().Before(deadline) {
+		requests = capture.snapshot()
+		if len(requests) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("got %d export requests, want 1", len(requests))
+	}
+	if got := findGaugeValues(requests, QueryLatencyMicros); len(got) != 1 || got[0] != 42 {
+		t.Fatalf("exported sample values = %v, want [42]", got)
+	}
+
+	// An empty export must release the in-flight guard.
+	e.export(context.Background(), nil)
+	if e.inFlight.Load() {
+		t.Fatal("empty export must not leave inFlight set")
+	}
+}
+
+func TestOTLPShutdownFlush(t *testing.T) {
+	capture, addr := startCaptureServer(t)
+
+	cfg := Config{
+		Enabled: true,
+		OTLP: OTLPConfig{
+			Enabled:  true,
+			URL:      addr,
+			Insecure: true,
+			// The ticker never fires; only the shutdown flush exports.
+			Interval: time.Minute,
+		},
+	}
+
+	pool := block.NewGarbageBlockPool(func() block.SharedColumns { return nil })
+	queue := make(chan block.SharedColumns, 1)
+
+	w, err := NewWorker(slog.New(slog.DiscardHandler), "run-flush", "test-config", "logs", 0, 0, nil, &cfg, pool, queue)
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		_ = w.Run(ctx)
+	}()
+
+	w.IncrementMetric(InsertRowsTotal, 9)
+	w.AddMetricPoint(QueryLatencyMicros, 4321)
+
+	cancel()
+	<-workerDone
+
+	requests := capture.snapshot()
+	if len(requests) != 1 {
+		t.Fatalf("got %d export requests, want 1 shutdown flush", len(requests))
+	}
+
+	var sumValue int64
+	var sumSeen bool
+	for _, req := range requests {
+		for _, rm := range req.ResourceMetrics {
+			for _, sm := range rm.ScopeMetrics {
+				for _, m := range sm.Metrics {
+					if m.Name != string(InsertRowsTotal) {
+						continue
+					}
+					sum := m.GetSum()
+					if sum == nil {
+						t.Fatalf("%s must be a Sum, got %T", m.Name, m.Data)
+					}
+					for _, dp := range sum.DataPoints {
+						sumSeen = true
+						sumValue = dp.GetAsInt()
+					}
+				}
+			}
+		}
+	}
+	if !sumSeen || sumValue != 9 {
+		t.Fatalf("flushed insert_rows_total = %d (seen=%v), want 9", sumValue, sumSeen)
+	}
+	if got := findGaugeValues(requests, QueryLatencyMicros); len(got) != 1 || got[0] != 4321 {
+		t.Fatalf("flushed sample values = %v, want [4321]", got)
+	}
+}
+
+func findGaugeValues(requests []*colmetricspb.ExportMetricsServiceRequest, name Name) []int64 {
+	var values []int64
+	for _, req := range requests {
+		for _, rm := range req.ResourceMetrics {
+			for _, sm := range rm.ScopeMetrics {
+				for _, m := range sm.Metrics {
+					if m.Name != string(name) {
+						continue
+					}
+					for _, dp := range m.GetGauge().GetDataPoints() {
+						values = append(values, dp.GetAsInt())
+					}
+				}
+			}
+		}
+	}
+	return values
+}
+
 func TestOTLPConfigValidate(t *testing.T) {
 	base := OTLPConfig{Enabled: true, URL: "localhost:4317"}
 

@@ -29,25 +29,8 @@ func fnvStr(h uint64, s string) uint64 {
 	return h
 }
 
-// fnvKVs folds key/value pairs into the running hash, in stored order. Rows that
-// share identical attributes (in the same column order) produce identical hashes,
-// which is how records are grouped into a single Resource/Scope.
-//
-// STILL USED BY THE LOGS BUILDER (convert_logs.go). The TRACES builder uses the
-// order-INSENSITIVE hashKVSet below instead: see its comment for why.
-func fnvKVs(h uint64, kvs []block.KV) uint64 {
-	for _, kv := range kvs {
-		h = fnvStr(h, kv.Key)
-		h = (h ^ 0x1f) * fnvPrime64
-		h = fnvStr(h, kv.Value)
-		h = (h ^ 0x1e) * fnvPrime64
-	}
-	return h
-}
-
-// fnvKVPair hashes ONE key/value pair to a standalone digest. The delimiters are
-// the same ones fnvKVs uses, so a given pair contributes the same bits in both
-// schemes; only the way pairs are COMBINED differs.
+// fnvKVPair hashes ONE key/value pair to a standalone digest, with a delimiter
+// between key and value so ("ab","c") and ("a","bc") differ.
 func fnvKVPair(kv block.KV) uint64 {
 	h := fnvStr(fnvOffset64, kv.Key)
 	h = (h ^ 0x1f) * fnvPrime64

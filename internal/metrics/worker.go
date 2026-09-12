@@ -161,6 +161,12 @@ func (w *Worker) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			// Flush the last partial interval before the deferred close.
+			if w.otlp != nil {
+				w.drainQueue()
+				w.collectInternalMetrics()
+				w.otlp.flush(w.snapshotCumulative())
+			}
 			return ctx.Err()
 		case m := <-w.metricsQueue:
 			w.applyMetricEntry(m)
@@ -178,6 +184,18 @@ func (w *Worker) Run(ctx context.Context) error {
 			} else {
 				w.resetMetrics()
 			}
+		}
+	}
+}
+
+// drainQueue applies any queued entries without blocking.
+func (w *Worker) drainQueue() {
+	for {
+		select {
+		case m := <-w.metricsQueue:
+			w.applyMetricEntry(m)
+		default:
+			return
 		}
 	}
 }

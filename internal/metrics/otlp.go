@@ -27,6 +27,9 @@ const (
 	// otlpMaxBufferedSamples bounds the sample-point buffer between exports;
 	// when full the oldest sample is dropped.
 	otlpMaxBufferedSamples = 10_000
+
+	// otlpShutdownTimeout bounds the final synchronous flush on shutdown.
+	otlpShutdownTimeout = 5 * time.Second
 )
 
 // otlpEmitter periodically exports the metrics worker's state as one OTLP
@@ -108,17 +111,20 @@ func (e *otlpEmitter) drainSamples() ([]Entry, uint64) {
 // export snapshots the buffered samples, builds one OTLP request from them and
 // the given cumulative snapshot, and sends it fire-and-forget: a failed export
 // is logged at warn and its data dropped, never blocking the metrics worker.
+// When the previous export is still in flight the interval is skipped and the
+// buffered samples are kept for the next one.
 func (e *otlpEmitter) export(ctx context.Context, snapshot map[metricKey]uint64) {
+	if !e.inFlight.CompareAndSwap(false, true) {
+		e.log.Warn("previous otlp export still in flight, skipping interval")
+		return
+	}
+
 	samples, dropped := e.drainSamples()
 	if dropped > 0 {
 		e.log.Debug("otlp sample buffer overflow, dropped oldest samples", "dropped", dropped)
 	}
 	if len(snapshot) == 0 && len(samples) == 0 {
-		return
-	}
-
-	if !e.inFlight.CompareAndSwap(false, true) {
-		e.log.Warn("previous otlp export still in flight, skipping interval")
+		e.inFlight.Store(false)
 		return
 	}
 
@@ -129,6 +135,27 @@ func (e *otlpEmitter) export(ctx context.Context, snapshot map[metricKey]uint64)
 			e.log.Warn("otlp export failed, dropping interval", "err", err)
 		}
 	}()
+}
+
+// flush synchronously exports the given snapshot plus any buffered samples.
+// Called on shutdown when the run context is already cancelled, so it uses its
+// own bounded context; a hung endpoint cannot block shutdown past the timeout.
+func (e *otlpEmitter) flush(snapshot map[metricKey]uint64) {
+	samples, dropped := e.drainSamples()
+	if dropped > 0 {
+		e.log.Debug("otlp sample buffer overflow, dropped oldest samples", "dropped", dropped)
+	}
+	if len(snapshot) == 0 && len(samples) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), otlpShutdownTimeout)
+	defer cancel()
+
+	req := e.buildRequest(snapshot, samples, time.Now())
+	if err := e.client.export(ctx, req); err != nil {
+		e.log.Warn("final otlp export failed", "err", err)
+	}
 }
 
 func (e *otlpEmitter) close() {

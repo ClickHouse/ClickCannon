@@ -94,7 +94,7 @@ func (w *worker) Run(ctx context.Context) error {
 		backoff := baseFlushBackoff
 		for attempt := 1; ; attempt++ {
 			flushStart := time.Now()
-			ferr := c.export(fctx, data)
+			rejected, rejectMsg, ferr := c.export(fctx, data)
 			if isMessageTooLarge(ferr) {
 				// Retrying can never succeed: the marshaled request exceeds the
 				// receiver's gRPC message limit.
@@ -106,6 +106,13 @@ func (w *worker) Run(ctx context.Context) error {
 				return
 			}
 			if ferr == nil {
+				// Partial success is still a success: never retried, the
+				// request counts as delivered, rejections tracked separately.
+				if rejected > 0 {
+					w.metrics.IncrementMetric(metrics.MetricGenPointsRejectedTotal, uint64(rejected))
+					w.log.Warn("endpoint rejected some data points (partial success, not retried)",
+						"rejected", rejected, "points", points, "message", rejectMsg)
+				}
 				b.reset()
 				lastFlush = time.Now()
 				totalPoints += uint64(points)

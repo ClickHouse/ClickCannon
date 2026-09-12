@@ -33,7 +33,7 @@ type Config struct {
 	HasTimestampTime bool `yaml:"has_timestamp_time"`
 }
 
-func (c Config) Validate() error {
+func (c *Config) Validate() error {
 	if !c.Enabled {
 		return nil
 	}

@@ -44,7 +44,7 @@ type ClickHouseConfig struct {
 	ProfilesTable string `yaml:"profiles_table"`
 }
 
-func (c ClickHouseConfig) Validate() error {
+func (c *ClickHouseConfig) Validate() error {
 	if c.Address == "" {
 		return errors.New("must set address")
 	}
@@ -59,22 +59,10 @@ func (c ClickHouseConfig) Validate() error {
 		return errors.New("must set database")
 	}
 
-	if c.LogsTable == "" {
-		return errors.New("must set logs_table")
-	}
-
-	if c.TracesTable == "" {
-		return errors.New("must set traces_table")
-	}
-
-	if c.ProfilesTable == "" {
-		return errors.New("must set profiles_table")
-	}
-
 	return nil
 }
 
-func (c Config) Validate() error {
+func (c *Config) Validate() error {
 	if !c.Enabled {
 		return nil
 	}

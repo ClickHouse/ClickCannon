@@ -175,6 +175,7 @@ func (w *worker) Run(ctx context.Context) error {
 		}
 		backoff := baseFlushBackoff
 		for attempt := 1; ; attempt++ {
+			flushStart := time.Now()
 			size, rows, ferr := b.flush(fctx, c)
 			if ferr == nil {
 				b.reset()
@@ -183,6 +184,10 @@ func (w *worker) Run(ctx context.Context) error {
 				w.metrics.IncrementMetric(metrics.OTelBytesTotal, uint64(size))
 				w.metrics.IncrementMetricWithAttr(metrics.OTelRowsWorkerTotal, uint64(rows), "worker_id", w.idStr)
 				w.metrics.IncrementMetricWithAttr(metrics.OTelBatchesWorkerTotal, 1, "worker_id", w.idStr)
+				w.metrics.AddMetricPointWithAttributes(metrics.OTelExportLatencyMicros, uint64(time.Since(flushStart).Microseconds()), map[string]string{
+					"worker_id": w.idStr,
+					"rows":      strconv.Itoa(rows),
+				})
 				return
 			}
 

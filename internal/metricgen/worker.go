@@ -93,6 +93,7 @@ func (w *worker) Run(ctx context.Context) error {
 
 		backoff := baseFlushBackoff
 		for attempt := 1; ; attempt++ {
+			flushStart := time.Now()
 			ferr := c.export(fctx, data)
 			if isMessageTooLarge(ferr) {
 				// Retrying can never succeed: the marshaled request exceeds the
@@ -113,6 +114,10 @@ func (w *worker) Run(ctx context.Context) error {
 				w.metrics.IncrementMetric(metrics.MetricGenRequestsTotal, 1)
 				w.metrics.IncrementMetric(metrics.MetricGenBytesTotal, uint64(size))
 				w.metrics.IncrementMetricWithAttr(metrics.MetricGenPointsWorkerTotal, uint64(points), "worker_id", w.idStr)
+				w.metrics.AddMetricPointWithAttributes(metrics.MetricGenExportLatencyMicros, uint64(time.Since(flushStart).Microseconds()), map[string]string{
+					"worker_id": w.idStr,
+					"points":    strconv.Itoa(points),
+				})
 				return
 			}
 

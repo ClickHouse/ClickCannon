@@ -111,4 +111,10 @@ const (
 
 	QueryLatencyMicros     Name = "query_latency_micros"
 	PreflightLatencyMicros Name = "preflight_latency_micros"
+
+	// Per-flush OTel export latency (attributes: worker_id, rows)
+	OTelExportLatencyMicros Name = "otel_export_latency_micros"
+
+	// Per-flush metric generator export latency (attributes: worker_id, points)
+	MetricGenExportLatencyMicros Name = "metricgen_export_latency_micros"
 )

@@ -93,7 +93,7 @@ type QueriesWorkflowConfig struct {
 
 func (QueriesWorkflowConfig) workflowConfig() {}
 
-func (c QueriesWorkflowConfig) Validate(userCfg Config) error {
+func (c *QueriesWorkflowConfig) Validate(userCfg Config) error {
 	if c.TimeAnchor == TimeAnchorDatasetEnd && userCfg.DatasetUnixEnd == 0 {
 		return fmt.Errorf("dataset_unix_end must be set when time_anchor is set to %q", c.TimeAnchor)
 	} else if c.TimeAnchor == TimeAnchorDatasetRandom && (userCfg.DatasetUnixStart == 0 || userCfg.DatasetUnixEnd == 0) {
@@ -159,7 +159,7 @@ type HARWorkflowConfig struct {
 
 func (HARWorkflowConfig) workflowConfig() {}
 
-func (c HARWorkflowConfig) Validate(_ Config) error {
+func (c *HARWorkflowConfig) Validate(_ Config) error {
 	if c.File == "" {
 		return errors.New("har workflow requires a file path")
 	}

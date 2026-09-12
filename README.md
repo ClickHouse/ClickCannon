@@ -115,6 +115,14 @@ Generation is **stateless and deterministic**: every point is a pure function of
 
 See the `metric_gen` section of `example.yaml` for every option.
 
+### Benchmarking a collector (DPM)
+
+DPM (data points per minute) is `points_per_second * 60`. Track achieved DPM as the rate of `metricgen_points_total` against the `target_metricgen_points_per_second` gauge.
+
+metric_gen has no separate insert/otel toggle to disable for a passthrough baseline; generation and export are one step. Baseline against a no-op collector first (OTLP receiver, `debug`/`nop` exporter, no ClickHouse write) with `points_per_second: 0` to find the generation+gRPC ceiling, then point `url` at the real collector pipeline and compare. Achieved DPM below that ceiling means the collector or ClickHouse is the bottleneck, not the generator.
+
+Watch `metricgen_export_latency_micros` for rising latency, the earliest saturation signal, and `metricgen_exports_failed_total` for batches dropped after retries.
+
 ## Disk (replay from files)
 
 Replays pre-exported data from disk.

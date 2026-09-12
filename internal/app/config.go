@@ -77,7 +77,7 @@ func (c Config) IsLogsData() bool {
 	return c.App.DataType == ConfigDataTypeLogs
 }
 
-func (c Config) Validate() error {
+func (c *Config) Validate() error {
 	// data_type drives the block pipeline (disk/generate -> insert/otel). The
 	// metric_gen and user modes don't touch blocks, so a run using only those
 	// may omit it.
@@ -108,6 +108,18 @@ func (c Config) Validate() error {
 
 	if err := c.Insert.Validate(); err != nil {
 		return fmt.Errorf("insert: %w", err)
+	}
+
+	// Only the table for the active data type is required.
+	if c.Insert.Enabled && c.GetInsertTable() == "" {
+		switch c.App.DataType {
+		case ConfigDataTypeLogs:
+			return errors.New("insert: clickhouse: must set logs_table")
+		case ConfigDataTypeTraces:
+			return errors.New("insert: clickhouse: must set traces_table")
+		case ConfigDataTypeProfiles:
+			return errors.New("insert: clickhouse: must set profiles_table")
+		}
 	}
 
 	if err := c.OTel.Validate(); err != nil {

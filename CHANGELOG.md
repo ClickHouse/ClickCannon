@@ -13,6 +13,9 @@
 - **Explicit metric names (`metric_gen.metric_names`)**: Optional list of metric names that overrides the built-in name table; when set, `metric_count` is forced to `len(metric_names)`. Types, units, and cardinality remain derived by metric index.
 - **Profiles support** — A new `profiles` data type joins `logs` and `traces` across the disk, generate, and insert pipelines. Set `app.data_type: profiles` to replay pre-exported profile `.native` files (`disk.profiles_path`), generate synthetic profiles (each row a sample with a random-depth call stack, configurable via `generate.profiles`), and insert into a profiles table (`insert.clickhouse.profiles_table`).
 - **OTel exporter** - Added experimental support for an OpenTelemetry OTLP exporter for disk/generated data.
+- **Config validation fixes**: `Validate()` methods now use pointer receivers so defaults set during validation (e.g. metrics table names) persist on the loaded config, and insert table validation only requires the table for the active `data_type` instead of all of them (from #12 by @wrn14897).
+- **OTel/metric_gen export latency metrics**: New `otel_export_latency_micros` and `metricgen_export_latency_micros` sample metrics record per-flush export latency, attributed by worker and row/point count (from #12 by @wrn14897).
+- **CI workflow**: Added a GitHub Actions workflow that runs `go build`, `go vet`, and `go test -race` on push and pull request.
 
 ### Bug Fixes
 

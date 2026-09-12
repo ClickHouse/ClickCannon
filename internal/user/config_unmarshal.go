@@ -37,10 +37,10 @@ func (b *WorkflowBaseConfig) UnmarshalYAML(ctx context.Context, unmarshal func(a
 	return nil
 }
 
-func unmarshalWorkflow[T WorkflowConfig](unmarshal func(any) error) (T, error) {
-	var cfg T
-	if err := unmarshal(&cfg); err != nil {
-		return cfg, err
+func unmarshalWorkflow[T any](unmarshal func(any) error) (*T, error) {
+	cfg := new(T)
+	if err := unmarshal(cfg); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }

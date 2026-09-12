@@ -21,9 +21,9 @@ type Workflow interface {
 
 func newWorkflow(log *slog.Logger, userCfg *Config, name string, cfg WorkflowBaseConfig, queryRunner QueryRunner, rng *rand.Rand, datasetStart, datasetEnd time.Time, m metrics.Store) (Workflow, error) {
 	switch c := cfg.Config.(type) {
-	case QueriesWorkflowConfig:
-		return NewQueriesWorkflow(log, userCfg, name, &c, queryRunner, rng, datasetStart, datasetEnd, m), nil
-	case HARWorkflowConfig:
+	case *QueriesWorkflowConfig:
+		return NewQueriesWorkflow(log, userCfg, name, c, queryRunner, rng, datasetStart, datasetEnd, m), nil
+	case *HARWorkflowConfig:
 		//return NewHARWorkflow(), nil
 		return nil, fmt.Errorf("unimplemented workflow type %q", cfg.Type)
 	default:

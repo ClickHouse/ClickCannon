@@ -1,9 +1,14 @@
 package metrics
 
 import (
+	"compress/gzip"
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +19,7 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	mpb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 )
 
 // captureServer is an in-process OTLP/gRPC metrics endpoint that records every
@@ -51,6 +57,77 @@ func startCaptureServer(t *testing.T) (*captureServer, string) {
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 	return capture, lis.Addr().String()
+}
+
+// httpCaptureServer records OTLP/HTTP exports; violations are collected, not failed inline, since an export can outlive the test body.
+type httpCaptureServer struct {
+	mu       sync.Mutex
+	requests []*colmetricspb.ExportMetricsServiceRequest
+	bad      []string
+}
+
+func (s *httpCaptureServer) snapshot() []*colmetricspb.ExportMetricsServiceRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*colmetricspb.ExportMetricsServiceRequest, len(s.requests))
+	copy(out, s.requests)
+	return out
+}
+
+func (s *httpCaptureServer) violations() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.bad...)
+}
+
+func (s *httpCaptureServer) reject(w http.ResponseWriter, format string, args ...any) {
+	s.mu.Lock()
+	s.bad = append(s.bad, fmt.Sprintf(format, args...))
+	s.mu.Unlock()
+	http.Error(w, "bad request", http.StatusBadRequest)
+}
+
+func startHTTPCaptureServer(t *testing.T) (*httpCaptureServer, string) {
+	t.Helper()
+	capture := &httpCaptureServer{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/metrics" {
+			capture.reject(w, "unexpected %s %s", r.Method, r.URL.Path)
+			return
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/x-protobuf" {
+			capture.reject(w, "unexpected content type %q", ct)
+			return
+		}
+		body := io.Reader(r.Body)
+		if r.Header.Get("Content-Encoding") == "gzip" {
+			zr, err := gzip.NewReader(body)
+			if err != nil {
+				capture.reject(w, "bad gzip body: %v", err)
+				return
+			}
+			defer zr.Close()
+			body = zr
+		}
+		data, err := io.ReadAll(body)
+		if err != nil {
+			capture.reject(w, "read body: %v", err)
+			return
+		}
+		req := &colmetricspb.ExportMetricsServiceRequest{}
+		if err := proto.Unmarshal(data, req); err != nil {
+			capture.reject(w, "unmarshal request: %v", err)
+			return
+		}
+		capture.mu.Lock()
+		capture.requests = append(capture.requests, req)
+		capture.mu.Unlock()
+		respBody, _ := proto.Marshal(&colmetricspb.ExportMetricsServiceResponse{})
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		_, _ = w.Write(respBody)
+	}))
+	t.Cleanup(srv.Close)
+	return capture, srv.URL
 }
 
 func attrValue(attrs []*commonpb.KeyValue, key string) (string, bool) {
@@ -362,6 +439,168 @@ func TestOTLPShutdownFlush(t *testing.T) {
 	}
 }
 
+func TestOTLPExportHTTP(t *testing.T) {
+	capture, url := startHTTPCaptureServer(t)
+
+	cfg := Config{
+		Enabled: true,
+		OTLP: OTLPConfig{
+			Enabled:  true,
+			Protocol: "http",
+			URL:      url,
+			Interval: time.Second,
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("config with http otlp sink should validate: %v", err)
+	}
+
+	pool := block.NewGarbageBlockPool(func() block.SharedColumns { return nil })
+	queue := make(chan block.SharedColumns, 1)
+
+	w, err := NewWorker(slog.New(slog.DiscardHandler), "run-http", "test-config", "logs", 0, 0, nil, &cfg, pool, queue)
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		_ = w.Run(ctx)
+	}()
+
+	w.IncrementMetric(InsertRowsTotal, 5)
+
+	deadline := time.Now().Add(10 * time.Second)
+	var requests []*colmetricspb.ExportMetricsServiceRequest
+	for time.Now().Before(deadline) {
+		requests = capture.snapshot()
+		if len(requests) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(requests) == 0 {
+		t.Fatal("no otlp/http export received within deadline")
+	}
+
+	cancel()
+	<-workerDone
+
+	if bad := capture.violations(); len(bad) > 0 {
+		t.Fatalf("otlp/http protocol violations: %v", bad)
+	}
+	if got, ok := attrValue(requests[0].ResourceMetrics[0].Resource.GetAttributes(), "service.name"); !ok || got != "clickcannon" {
+		t.Fatalf("service.name = %q (present=%v), want clickcannon", got, ok)
+	}
+	if got := findSumValues(requests[:1], InsertRowsTotal); len(got) != 1 || got[0] != 5 {
+		t.Fatalf("insert_rows_total over http = %v, want [5]", got)
+	}
+}
+
+func TestOTLPShutdownFlushHTTP(t *testing.T) {
+	capture, url := startHTTPCaptureServer(t)
+
+	cfg := Config{
+		Enabled: true,
+		OTLP: OTLPConfig{
+			Enabled:     true,
+			Protocol:    "http",
+			URL:         url,
+			Compression: "gzip",
+			// The ticker never fires; only the shutdown flush exports.
+			Interval: time.Minute,
+		},
+	}
+
+	pool := block.NewGarbageBlockPool(func() block.SharedColumns { return nil })
+	queue := make(chan block.SharedColumns, 1)
+
+	w, err := NewWorker(slog.New(slog.DiscardHandler), "run-http-flush", "test-config", "logs", 0, 0, nil, &cfg, pool, queue)
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		_ = w.Run(ctx)
+	}()
+
+	w.IncrementMetric(InsertRowsTotal, 9)
+	w.AddMetricPoint(QueryLatencyMicros, 4321)
+
+	cancel()
+	<-workerDone
+
+	if bad := capture.violations(); len(bad) > 0 {
+		t.Fatalf("otlp/http protocol violations: %v", bad)
+	}
+	requests := capture.snapshot()
+	if len(requests) != 1 {
+		t.Fatalf("got %d export requests, want 1 shutdown flush", len(requests))
+	}
+	if got := findSumValues(requests, InsertRowsTotal); len(got) != 1 || got[0] != 9 {
+		t.Fatalf("flushed insert_rows_total = %v, want [9]", got)
+	}
+	if got := findGaugeValues(requests, QueryLatencyMicros); len(got) != 1 || got[0] != 4321 {
+		t.Fatalf("flushed sample values = %v, want [4321]", got)
+	}
+}
+
+func TestOTLPHTTPURL(t *testing.T) {
+	cases := []struct {
+		raw      string
+		insecure bool
+		want     string
+		wantErr  bool
+	}{
+		{raw: "localhost:4318", insecure: true, want: "http://localhost:4318/v1/metrics"},
+		{raw: "localhost:4318", insecure: false, want: "https://localhost:4318/v1/metrics"},
+		{raw: "http://localhost:4318", insecure: false, want: "http://localhost:4318/v1/metrics"},
+		{raw: "https://collector/base/", insecure: true, want: "https://collector/base/v1/metrics"},
+		{raw: "https://collector/v1/metrics", insecure: false, want: "https://collector/v1/metrics"},
+		{raw: "grpc://localhost:4317", wantErr: true},
+	}
+	for _, tc := range cases {
+		base, err := otlpBaseURL(tc.raw, tc.insecure)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("otlpBaseURL(%q) must fail", tc.raw)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("otlpBaseURL(%q): %v", tc.raw, err)
+		}
+		if got := otlpMetricsURL(base); got != tc.want {
+			t.Fatalf("metrics url for (%q, insecure=%v) = %q, want %q", tc.raw, tc.insecure, got, tc.want)
+		}
+	}
+}
+
+func findSumValues(requests []*colmetricspb.ExportMetricsServiceRequest, name Name) []int64 {
+	var values []int64
+	for _, req := range requests {
+		for _, rm := range req.ResourceMetrics {
+			for _, sm := range rm.ScopeMetrics {
+				for _, m := range sm.Metrics {
+					if m.Name != string(name) {
+						continue
+					}
+					for _, dp := range m.GetSum().GetDataPoints() {
+						values = append(values, dp.GetAsInt())
+					}
+				}
+			}
+		}
+	}
+	return values
+}
+
 func findGaugeValues(requests []*colmetricspb.ExportMetricsServiceRequest, name Name) []int64 {
 	var values []int64
 	for _, req := range requests {
@@ -392,6 +631,22 @@ func TestOTLPConfigValidate(t *testing.T) {
 	}
 
 	bad := base
+	bad.Protocol = "tcp"
+	if err := bad.Validate(); err == nil {
+		t.Fatal("unknown protocol must fail validation")
+	}
+	for _, p := range []string{"", "grpc", "http"} {
+		ok := base
+		ok.Protocol = p
+		if err := ok.Validate(); err != nil {
+			t.Fatalf("protocol %q must validate: %v", p, err)
+		}
+	}
+	if got := (OTLPConfig{}).protocol(); got != "grpc" {
+		t.Fatalf("default protocol = %q, want grpc", got)
+	}
+
+	bad = base
 	bad.Compression = "zstd"
 	if err := bad.Validate(); err == nil {
 		t.Fatal("unknown compression must fail validation")

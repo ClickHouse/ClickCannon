@@ -3,6 +3,7 @@ package metricgen
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -51,18 +52,33 @@ func (c rawRequestCodec) Unmarshal(data mem.BufferSlice, v any) error {
 
 func (c rawRequestCodec) Name() string { return c.base.Name() }
 
-// client is a thin OTLP/gRPC metrics export client, mirroring the logs/traces
-// client in internal/otel.
-type client struct {
+// exporter abstracts the OTLP transport (gRPC or HTTP) over the same pre-marshaled request bytes.
+type exporter interface {
+	export(ctx context.Context, data preMarshaled) (rejected int64, rejectMsg string, err error)
+	close() error
+}
+
+// dial generally only fails on invalid configuration; connections are lazy where possible.
+func dial(cfg *Config) (exporter, error) {
+	switch cfg.protocol() {
+	case protocolHTTP:
+		return dialHTTP(cfg)
+	default:
+		return dialGRPC(cfg)
+	}
+}
+
+// grpcClient is a thin OTLP/gRPC metrics export client, mirroring the logs/traces client in internal/otel.
+type grpcClient struct {
 	conn    *grpc.ClientConn
 	codec   rawRequestCodec
 	md      metadata.MD
 	timeout time.Duration
 }
 
-// dial creates a lazy gRPC client. grpc.NewClient does not open a connection
+// dialGRPC creates a lazy gRPC client. grpc.NewClient does not open a connection
 // until the first RPC, so this only fails on invalid configuration.
-func dial(cfg *Config) (*client, error) {
+func dialGRPC(cfg *Config) (*grpcClient, error) {
 	target, plaintext := parseTarget(cfg.URL)
 	if cfg.Insecure {
 		plaintext = true
@@ -83,7 +99,7 @@ func dial(cfg *Config) (*client, error) {
 		return nil, fmt.Errorf("failed to create grpc client for %q: %w", target, err)
 	}
 
-	c := &client{
+	c := &grpcClient{
 		conn:    conn,
 		codec:   rawRequestCodec{base: encoding.GetCodecV2(grpcproto.Name)},
 		timeout: cfg.Timeout,
@@ -98,7 +114,7 @@ func dial(cfg *Config) (*client, error) {
 // success response is a success per the OTLP spec and must not be retried;
 // the rejected point count and endpoint message are returned alongside a nil
 // error so the caller can account for them.
-func (c *client) export(ctx context.Context, data preMarshaled) (rejected int64, rejectMsg string, err error) {
+func (c *grpcClient) export(ctx context.Context, data preMarshaled) (rejected int64, rejectMsg string, err error) {
 	if c.md != nil {
 		ctx = metadata.NewOutgoingContext(ctx, c.md)
 	}
@@ -117,16 +133,17 @@ func (c *client) export(ctx context.Context, data preMarshaled) (rejected int64,
 	return 0, "", nil
 }
 
-func (c *client) close() error {
+func (c *grpcClient) close() error {
 	return c.conn.Close()
 }
 
-// isMessageTooLarge reports whether an export failed because the marshaled
-// request exceeds the receiver's gRPC message size limit: a permanent
-// failure for that request that must not be retried.
+// isMessageTooLarge reports a receiver size-limit failure (gRPC ResourceExhausted or HTTP 413), permanent and non-retryable.
 func isMessageTooLarge(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, errHTTPTooLarge) {
+		return true
 	}
 	s, ok := status.FromError(err)
 	if !ok {

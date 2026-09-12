@@ -234,6 +234,7 @@ func (w *worker) buildClient(ctx context.Context) (*ch.Client, func(), error) {
 		ClientName: "clickcannon",
 		Settings: []ch.Setting{
 			{Key: "insert_deduplicate", Value: "0"},
+			{Key: "send_profile_events", Value: "1"},
 		},
 	}
 

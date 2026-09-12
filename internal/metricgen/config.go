@@ -26,31 +26,30 @@ func (w TypeWeights) total() int {
 
 // Config controls the OTLP metrics generator/exporter. Unlike disk/generate +
 // insert/otel, this mode is fully self-contained: it synthesizes OTLP metrics
-// directly (no block queue) and exports them to an OTLP/gRPC endpoint, e.g. an
+// directly (no block queue) and exports them to an OTLP endpoint, e.g. an
 // OTel Collector running the ClickHouse exporter with metrics_schema: v2.
 type Config struct {
 	Enabled bool `yaml:"enabled"`
 
-	// URL is the OTLP/gRPC endpoint, e.g. "localhost:4317". A leading
-	// "http://" / "https://" / "grpc://" scheme is accepted and stripped;
-	// "http://" implies insecure.
+	// Protocol selects the OTLP transport: "grpc" (default, typically port 4317) or "http" (protobuf payload, typically port 4318).
+	Protocol string `yaml:"protocol"`
+
+	// URL is the OTLP endpoint: a host:port for gRPC, or a base http(s) URL for HTTP ("/v1/metrics" is appended).
 	URL string `yaml:"url"`
 
-	// Insecure disables transport security (plaintext gRPC).
+	// Insecure disables TLS; an explicit scheme in URL takes precedence over this flag.
 	Insecure bool `yaml:"insecure"`
 
-	// Compression is the gRPC compressor to use: "gzip" or "" / "none".
+	// Compression is the request compression: "gzip" or "" / "none".
 	Compression string `yaml:"compression"`
 
-	// Headers are optional gRPC metadata sent with every export (e.g. auth tokens).
+	// Headers are optional headers sent with every export (e.g. auth tokens).
 	Headers map[string]string `yaml:"headers"`
 
 	// Timeout is the per-export-request deadline. Defaults to 30s.
 	Timeout time.Duration `yaml:"timeout"`
 
-	// Threads is the number of concurrent generator/exporter workers. Each
-	// worker holds one gRPC connection and generates an interleaved shard of
-	// the series space (series index striped by thread).
+	// Threads is the number of concurrent workers; each holds one connection and generates an interleaved shard of the series space.
 	Threads int `yaml:"threads"`
 
 	// PointsPerRequest is the number of data points accumulated before an
@@ -180,6 +179,9 @@ type Config struct {
 }
 
 const (
+	protocolGRPC = "grpc"
+	protocolHTTP = "http"
+
 	defaultTimeout          = 30 * time.Second
 	defaultFlushInterval    = time.Second
 	defaultThreads          = 4
@@ -207,6 +209,14 @@ const (
 )
 
 var defaultTypeWeights = TypeWeights{Gauge: 30, Sum: 30, Histogram: 20, ExponentialHistogram: 10, Summary: 10}
+
+// protocol returns the configured transport, defaulting to gRPC when unset.
+func (c Config) protocol() string {
+	if c.Protocol == "" {
+		return protocolGRPC
+	}
+	return c.Protocol
+}
 
 // withDefaults returns a copy of the config with zero-valued tunables filled in.
 func (c Config) withDefaults() Config {
@@ -264,6 +274,11 @@ func (c Config) Validate() error {
 		return nil
 	}
 
+	switch c.Protocol {
+	case "", protocolGRPC, protocolHTTP:
+	default:
+		return errors.New("protocol must be one of: grpc, http")
+	}
 	if c.URL == "" {
 		return errors.New("must set url")
 	}

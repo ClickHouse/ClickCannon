@@ -6,24 +6,25 @@ import (
 	"time"
 )
 
-// OTLPConfig controls exporting the self-metrics over OTLP/gRPC in addition to
+// OTLPConfig controls exporting the self-metrics over OTLP in addition to
 // (or instead of) the ClickHouse perf sink. Every interval the worker's current
 // metric state is snapshotted and exported as one OTLP metrics request.
 type OTLPConfig struct {
 	Enabled bool `yaml:"enabled"`
 
-	// URL is the OTLP/gRPC endpoint, e.g. "localhost:4317". A leading
-	// "http://" / "https://" / "grpc://" scheme is accepted and stripped;
-	// "http://" implies insecure.
+	// Protocol selects the OTLP transport: "grpc" (default) or "http" (protobuf payload).
+	Protocol string `yaml:"protocol"`
+
+	// URL is the OTLP endpoint, e.g. "localhost:4317" (grpc) or "localhost:4318" (http; "/v1/metrics" is appended).
 	URL string `yaml:"url"`
 
-	// Insecure disables transport security (plaintext gRPC).
+	// Insecure disables transport security; an explicit scheme in URL takes precedence.
 	Insecure bool `yaml:"insecure"`
 
-	// Compression is the gRPC compressor to use: "gzip" or "" / "none".
+	// Compression is the compressor to use: "gzip" or "" / "none".
 	Compression string `yaml:"compression"`
 
-	// Headers are optional gRPC metadata sent with every export (e.g. auth tokens).
+	// Headers are optional headers sent with every export (e.g. auth tokens).
 	Headers map[string]string `yaml:"headers"`
 
 	// Interval is how often the metric state is exported. Defaults to 15s,
@@ -31,7 +32,19 @@ type OTLPConfig struct {
 	Interval time.Duration `yaml:"interval"`
 }
 
-const defaultOTLPInterval = 15 * time.Second
+const (
+	otlpProtocolGRPC = "grpc"
+	otlpProtocolHTTP = "http"
+
+	defaultOTLPInterval = 15 * time.Second
+)
+
+func (c OTLPConfig) protocol() string {
+	if c.Protocol == "" {
+		return otlpProtocolGRPC
+	}
+	return c.Protocol
+}
 
 func (c OTLPConfig) withDefaults() OTLPConfig {
 	if c.Interval <= 0 {
@@ -43,6 +56,12 @@ func (c OTLPConfig) withDefaults() OTLPConfig {
 func (c OTLPConfig) Validate() error {
 	if !c.Enabled {
 		return nil
+	}
+
+	switch c.Protocol {
+	case "", otlpProtocolGRPC, otlpProtocolHTTP:
+	default:
+		return errors.New("protocol must be one of: grpc, http")
 	}
 
 	if c.URL == "" {

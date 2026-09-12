@@ -76,10 +76,10 @@ func shiftColStrLastByte(col *proto.ColStr, loopIndex int) {
 
 // ShiftDateToToday shifts the time.Time to current date without affecting time component
 func ShiftDateToToday(oldTime time.Time) time.Time {
-	now := time.Now()
+	loc := oldTime.Location()
+	now := time.Now().In(loc)
 	hour, minute, sec := oldTime.Clock()
 	nsec := oldTime.Nanosecond()
-	loc := oldTime.Location()
 
 	newTime := time.Date(
 		now.Year(),
@@ -97,7 +97,8 @@ func ShiftDateToToday(oldTime time.Time) time.Time {
 
 // ShiftTimestampMinute shifts the time.Time to current minute without affecting seconds component
 func ShiftTimestampMinute(original time.Time) time.Time {
-	now := time.Now()
+	loc := original.Location()
+	now := time.Now().In(loc)
 	newTime := time.Date(
 		now.Year(),
 		now.Month(),
@@ -106,7 +107,7 @@ func ShiftTimestampMinute(original time.Time) time.Time {
 		now.Minute(),
 		original.Second(),
 		original.Nanosecond(),
-		original.Location(),
+		loc,
 	)
 
 	return newTime

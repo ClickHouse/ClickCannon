@@ -98,6 +98,8 @@ The `metric_gen` mode is a self-contained OTLP metrics generator/exporter built 
 ClickCannon (metric_gen) ──OTLP/gRPC──▶ OTel Collector (clickhouseexporter, metrics_schema: v2) ──▶ ClickHouse
 ```
 
+`protocol: http` switches `url` to OTLP/HTTP instead of gRPC (default `grpc`).
+
 Three primary knobs control the workload:
 
 1. **Number of unique metrics** (`metric_count`): names come from a fixed lookup table (`adjective_adjective_noun`), stable across runs.

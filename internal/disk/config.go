@@ -42,18 +42,6 @@ func (c *Config) Validate() error {
 		return errors.New("must set threads to a value greater than zero")
 	}
 
-	if c.LogsPath == "" {
-		return errors.New("logs_path is empty")
-	}
-
-	if c.TracesPath == "" {
-		return errors.New("traces_path is empty")
-	}
-
-	if c.ProfilesPath == "" {
-		return errors.New("profiles_path is empty")
-	}
-
 	if c.MiBytesPerSecondLimit < 1 {
 		return errors.New("must set mb_per_second_limit to a value greater than zero")
 	}

@@ -4,6 +4,8 @@
 
 ### New Features
 
+- **OTLP/HTTP transport (`metric_gen.protocol`, `metrics.otlp.protocol`)**: `metric_gen` and the self-metrics `metrics.otlp` exporter now accept `protocol: grpc` (default) or `http`, matching the otel exporter's OTLP/HTTP support.
+- **OTLP/HTTP support for the otel exporter (`otel.protocol`)**: The otel exporter now accepts `protocol: grpc` (default) or `http`, POSTing protobuf-encoded OTLP requests to the endpoint's per-signal path (`/v1/logs`, `/v1/traces`) with optional gzip compression (#9 by @knudtty).
 - **Per-metric type and cardinality overrides (`metric_gen.metric_types`, `metric_gen.metric_cardinalities`)**: Optional lists parallel to `metric_names`; each requires it, must match its length, and can be set independently. `metric_types` pins each metric's type (`gauge`, `sum`, `histogram`, `exponential_histogram`, `summary`) instead of the `type_weights` round-robin, and `metric_cardinalities` pins each metric's exact series count (each entry >= 1) instead of the cardinality decay curve.
 - **Staleness markers (`metric_gen.staleness_markers`)**: When a resource generation rotates out, each of its series emits one final `FLAG_NO_RECORDED_VALUE` point on the outgoing resource identity, matching what the collector's prometheusreceiver produces when a scrape target disappears. Requires `resource_lifetime` churn; off by default.
 - **ClickCannon self-metrics OTLP export (`metrics.otlp`)**: The metrics worker can now export its own operational metrics over OTLP/gRPC to an OTel collector, in addition to the ClickHouse sink, via a new `metrics.otlp` block (`enabled`, `url`, `insecure`, `compression`, `headers`, `interval`; default interval 15s, minimum 1s). Metric names are preserved, `*_total` counters map to cumulative monotonic Sums and other values to Gauges, and `metrics.clickhouse_dsn` is now optional when the OTLP exporter is enabled.
@@ -16,6 +18,7 @@
 - **Config validation fixes**: `Validate()` methods now use pointer receivers so defaults set during validation (e.g. metrics table names) persist on the loaded config, and insert table validation only requires the table for the active `data_type` instead of all of them (from #12 by @wrn14897).
 - **OTel/metric_gen export latency metrics**: New `otel_export_latency_micros` and `metricgen_export_latency_micros` sample metrics record per-flush export latency, attributed by worker and row/point count (from #12 by @wrn14897).
 - **CI workflow**: Added a GitHub Actions workflow that runs `go build`, `go vet`, and `go test -race` on push and pull request.
+- **Dependency updates**: Updated direct dependencies (ch-go v0.74.0, clickhouse-go v2.48.0, grpc v1.83.2, protobuf v1.36.12, otlp proto v1.11.0, go-yaml, compress, x/time).
 
 ### Bug Fixes
 
@@ -26,6 +29,9 @@
 - **`metric_gen` OTLP partial-success handling**: `metric_gen` no longer retries points an OTLP partial-success response already rejected; rejected points are now counted in `metricgen_points_rejected_total`.
 - **`type_weights` totals**: `metric_gen.type_weights` totals are now capped instead of allowed to exceed valid bounds.
 - **Self-metrics OTLP export drops**: Self-metrics OTLP export no longer drops samples on skipped intervals, and now flushes once on shutdown.
+- **Timestamp shift timezone consistency**: `ShiftDateToToday` and `ShiftTimestampMinute` now take the current date in the source timestamp's timezone instead of the local one, so shifted values land on the correct day and minute (from #13 by @MrSsunlight).
+- **Disk path validation scoping**: `disk` mode now only requires the path for the active `app.data_type` instead of all of `logs_path`, `traces_path`, and `profiles_path` (reported in #13).
+- **Insert profile events**: Insert connections now set `send_profile_events=1` explicitly so `InsertedBytes`-based metrics do not depend on server defaults (from #13 by @MrSsunlight).
 - **Metric Gen bytes panel unit**: Fixed the "Metric Gen OTLP Bytes/s" Grafana panel showing the wrong unit.
 
 ## v0.4.0

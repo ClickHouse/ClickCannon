@@ -15,20 +15,35 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// otlpClient is a thin OTLP/gRPC metrics export client for the self-metrics
+// otlpClient abstracts the OTLP export transport (gRPC or HTTP); both send the same request message.
+type otlpClient interface {
+	export(ctx context.Context, req *colmetricspb.ExportMetricsServiceRequest) error
+	close() error
+}
+
+func dialOTLP(cfg OTLPConfig, timeout time.Duration) (otlpClient, error) {
+	switch cfg.protocol() {
+	case otlpProtocolHTTP:
+		return dialOTLPHTTP(cfg, timeout)
+	default:
+		return dialOTLPGRPC(cfg, timeout)
+	}
+}
+
+// otlpGRPCClient is a thin OTLP/gRPC metrics export client for the self-metrics
 // pipeline, mirroring the client in internal/metricgen. It is kept local so
 // internal/metrics stays import-free of the generator packages (which import
 // this package).
-type otlpClient struct {
+type otlpGRPCClient struct {
 	conn    *grpc.ClientConn
 	metrics colmetricspb.MetricsServiceClient
 	md      metadata.MD
 	timeout time.Duration
 }
 
-// dialOTLP creates a lazy gRPC client. grpc.NewClient does not open a
+// dialOTLPGRPC creates a lazy gRPC client. grpc.NewClient does not open a
 // connection until the first RPC, so this only fails on invalid configuration.
-func dialOTLP(cfg OTLPConfig, timeout time.Duration) (*otlpClient, error) {
+func dialOTLPGRPC(cfg OTLPConfig, timeout time.Duration) (*otlpGRPCClient, error) {
 	target, plaintext := parseOTLPTarget(cfg.URL)
 	if cfg.Insecure {
 		plaintext = true
@@ -49,7 +64,7 @@ func dialOTLP(cfg OTLPConfig, timeout time.Duration) (*otlpClient, error) {
 		return nil, fmt.Errorf("failed to create grpc client for %q: %w", target, err)
 	}
 
-	c := &otlpClient{
+	c := &otlpGRPCClient{
 		conn:    conn,
 		metrics: colmetricspb.NewMetricsServiceClient(conn),
 		timeout: timeout,
@@ -60,7 +75,7 @@ func dialOTLP(cfg OTLPConfig, timeout time.Duration) (*otlpClient, error) {
 	return c, nil
 }
 
-func (c *otlpClient) export(ctx context.Context, req *colmetricspb.ExportMetricsServiceRequest) error {
+func (c *otlpGRPCClient) export(ctx context.Context, req *colmetricspb.ExportMetricsServiceRequest) error {
 	if c.md != nil {
 		ctx = metadata.NewOutgoingContext(ctx, c.md)
 	}
@@ -79,7 +94,7 @@ func (c *otlpClient) export(ctx context.Context, req *colmetricspb.ExportMetrics
 	return nil
 }
 
-func (c *otlpClient) close() error {
+func (c *otlpGRPCClient) close() error {
 	return c.conn.Close()
 }
 

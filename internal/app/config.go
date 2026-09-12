@@ -102,6 +102,17 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("disk: %w", err)
 	}
 
+	if c.Disk.Enabled && c.GetDataFolder() == "" {
+		switch c.App.DataType {
+		case ConfigDataTypeLogs:
+			return errors.New("disk: must set logs_path")
+		case ConfigDataTypeTraces:
+			return errors.New("disk: must set traces_path")
+		case ConfigDataTypeProfiles:
+			return errors.New("disk: must set profiles_path")
+		}
+	}
+
 	if err := c.Generate.Validate(); err != nil {
 		return fmt.Errorf("generate: %w", err)
 	}
@@ -110,7 +121,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("insert: %w", err)
 	}
 
-	// Only the table for the active data type is required.
 	if c.Insert.Enabled && c.GetInsertTable() == "" {
 		switch c.App.DataType {
 		case ConfigDataTypeLogs:

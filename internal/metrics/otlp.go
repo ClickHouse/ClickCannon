@@ -45,7 +45,7 @@ const (
 //     sample, keeping each sample's own timestamp and attributes
 type otlpEmitter struct {
 	log      *slog.Logger
-	client   *otlpClient
+	client   otlpClient
 	interval time.Duration
 
 	resource  *resourcepb.Resource

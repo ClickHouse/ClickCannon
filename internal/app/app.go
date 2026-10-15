@@ -55,6 +55,9 @@ func Setup() (string, string, *Config, *slog.Logger, func()) {
 	}
 
 	log.Info("starting clickcannon", "seed", cfg.App.Seed, "data_type", cfg.App.DataType)
+	if cfg.App.PrintOTLPSize {
+		printOTLPSize(log, cfg)
+	}
 
 	return runID, cfgFileName, cfg, log, closeFunc
 }

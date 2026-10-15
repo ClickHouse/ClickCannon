@@ -29,12 +29,13 @@ type PprofConfig struct {
 
 type Config struct {
 	App struct {
-		Name         string `yaml:"name"`
-		LogToFile    bool   `yaml:"log_to_file"`
-		LogToConsole bool   `yaml:"log_to_console"`
-		LogLevel     string `yaml:"log_level"`
-		DataType     string `yaml:"data_type"`
-		Seed         string `yaml:"seed"`
+		Name          string `yaml:"name"`
+		LogToFile     bool   `yaml:"log_to_file"`
+		LogToConsole  bool   `yaml:"log_to_console"`
+		LogLevel      string `yaml:"log_level"`
+		DataType      string `yaml:"data_type"`
+		Seed          string `yaml:"seed"`
+		PrintOTLPSize bool   `yaml:"print_otlp_size"`
 	} `yaml:"app"`
 
 	Pprof     PprofConfig      `yaml:"pprof"`
@@ -88,6 +89,10 @@ func (c *Config) Validate() error {
 		}
 	} else if c.App.DataType != ConfigDataTypeLogs && c.App.DataType != ConfigDataTypeTraces && c.App.DataType != ConfigDataTypeProfiles {
 		return errors.New("app: data_type must be one of: logs, traces, profiles")
+	}
+
+	if c.App.PrintOTLPSize && c.App.DataType != ConfigDataTypeLogs && c.App.DataType != ConfigDataTypeTraces && !c.MetricGen.Enabled {
+		return errors.New("app: print_otlp_size requires data_type logs or traces, or metric_gen enabled")
 	}
 
 	if c.Disk.Enabled && c.Generate.Enabled {

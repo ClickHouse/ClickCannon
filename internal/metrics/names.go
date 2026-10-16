@@ -50,6 +50,7 @@ const (
 	// MetricGenPointsRejectedTotal counts points rejected via OTLP partial
 	// success responses; the requests themselves succeeded and are not retried.
 	MetricGenPointsRejectedTotal Name = "metricgen_points_rejected_total"
+	MetricGenPointsDroppedTotal  Name = "metricgen_points_dropped_total"
 
 	// Per-worker metric generator counters (attribute: worker_id)
 	MetricGenPointsWorkerTotal Name = "metricgen_points_worker_total"

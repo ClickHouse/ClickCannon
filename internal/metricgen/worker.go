@@ -84,6 +84,7 @@ func (w *worker) Run(ctx context.Context) error {
 		data, merr := proto.Marshal(req)
 		if merr != nil {
 			w.metrics.IncrementMetric(metrics.MetricGenExportsFailedTotal, 1)
+			w.metrics.IncrementMetric(metrics.MetricGenPointsDroppedTotal, uint64(points))
 			w.log.Error("marshal failed, dropping request", "points", points, "err", merr)
 			b.reset()
 			lastFlush = time.Now()
@@ -99,6 +100,7 @@ func (w *worker) Run(ctx context.Context) error {
 				// Retrying can never succeed: the marshaled request exceeds the
 				// receiver's gRPC message limit.
 				w.metrics.IncrementMetric(metrics.MetricGenExportsFailedTotal, 1)
+				w.metrics.IncrementMetric(metrics.MetricGenPointsDroppedTotal, uint64(points))
 				w.log.Error("export rejected: request exceeds the receiver's gRPC message limit; lower points_per_request or raise max_recv_msg_size_mib on the OTLP receiver",
 					"points", points, "bytes", size, "err", ferr)
 				b.reset()
@@ -130,6 +132,7 @@ func (w *worker) Run(ctx context.Context) error {
 
 			w.metrics.IncrementMetric(metrics.MetricGenExportsFailedTotal, 1)
 			if fctx.Err() != nil || attempt >= maxFlushAttempts {
+				w.metrics.IncrementMetric(metrics.MetricGenPointsDroppedTotal, uint64(points))
 				w.log.Warn("export failed, dropping request", "attempts", attempt, "points", points, "err", ferr)
 				b.reset()
 				lastFlush = time.Now()
@@ -138,6 +141,7 @@ func (w *worker) Run(ctx context.Context) error {
 			w.log.Debug("export failed, retrying", "attempt", attempt, "backoff", backoff, "err", ferr)
 			select {
 			case <-fctx.Done():
+				w.metrics.IncrementMetric(metrics.MetricGenPointsDroppedTotal, uint64(points))
 				w.log.Warn("export failed, dropping request on shutdown", "points", points, "err", ferr)
 				b.reset()
 				return

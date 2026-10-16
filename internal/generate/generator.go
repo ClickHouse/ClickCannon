@@ -84,7 +84,7 @@ func (g *randStrGen) Generate(rng *Rng) string {
 	return g.prefix + rng.AlphaNum(g.length)
 }
 
-func RandStr(length int) *randStrGen          { return &randStrGen{length: length} }
+func RandStr(length int) *randStrGen              { return &randStrGen{length: length} }
 func (g *randStrGen) Prefix(p string) *randStrGen { g.prefix = p; return g }
 
 // =============================================================================
@@ -103,7 +103,7 @@ func (g *hexGen) Generate(rng *Rng) string {
 	return g.prefix + rng.HexString(g.length)
 }
 
-func Hex(length int) *hexGen          { return &hexGen{length: length} }
+func Hex(length int) *hexGen              { return &hexGen{length: length} }
 func (g *hexGen) Prefix(p string) *hexGen { g.prefix = p; return g }
 
 // =============================================================================
@@ -142,9 +142,9 @@ func (g *ipGen) Generate(rng *Rng) string {
 	}
 }
 
-func IP() *ipGen                 { return &ipGen{} }
-func (g *ipGen) AsU32() *ipGen   { g.format = ipFmtU32; return g }
-func (g *ipGen) AsHex() *ipGen   { g.format = ipFmtHex; return g }
+func IP() *ipGen               { return &ipGen{} }
+func (g *ipGen) AsU32() *ipGen { g.format = ipFmtU32; return g }
+func (g *ipGen) AsHex() *ipGen { g.format = ipFmtHex; return g }
 
 const hexDigits = "0123456789abcdef"
 
@@ -208,7 +208,7 @@ func (g *intGen) Generate(rng *Rng) string {
 	return g.prefix + strconv.Itoa(v)
 }
 
-func Int(min, max int) *intGen        { return &intGen{min: min, max: max} }
+func Int(min, max int) *intGen            { return &intGen{min: min, max: max} }
 func (g *intGen) Prefix(p string) *intGen { g.prefix = p; return g }
 
 type floatGen struct {
@@ -225,7 +225,7 @@ func (g *floatGen) Generate(rng *Rng) string {
 	return g.prefix + strconv.FormatFloat(v, 'f', g.decimals, 64)
 }
 
-func Float(max float64) *floatGen          { return &floatGen{max: max, decimals: 2} }
+func Float(max float64) *floatGen             { return &floatGen{max: max, decimals: 2} }
 func (g *floatGen) Precision(n int) *floatGen { g.decimals = n; return g }
 func (g *floatGen) Prefix(p string) *floatGen { g.prefix = p; return g }
 
@@ -266,6 +266,38 @@ type mapEntry struct {
 type MapGen struct {
 	entries []mapEntry
 	avgKeys int
+}
+
+// MapEntryInfo exposes the profile probability and generator for one map attr
+type MapEntryInfo struct {
+	Key       string
+	Prob      float64
+	ValueGen  Gen
+	SuffixLen int
+	RandomKey bool
+}
+
+// Entries returns a copy of the map attr definitions for diagnostics
+func (g *MapGen) Entries() []MapEntryInfo {
+	if g == nil || len(g.entries) == 0 {
+		return nil
+	}
+	out := make([]MapEntryInfo, 0, len(g.entries))
+	for _, e := range g.entries {
+		key := e.fixedKey
+		randomKey := e.keyPfx != ""
+		if randomKey {
+			key = e.keyPfx
+		}
+		out = append(out, MapEntryInfo{
+			Key:       key,
+			Prob:      e.prob,
+			ValueGen:  e.valueGen,
+			SuffixLen: e.suffixLen,
+			RandomKey: randomKey,
+		})
+	}
+	return out
 }
 
 // MapKey is a single entry inside a Map(...) builder. Use K or KP to construct.

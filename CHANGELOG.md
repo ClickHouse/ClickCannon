@@ -4,6 +4,7 @@
 
 ### New Features
 
+- **OTLP size diagnostics (`app.print_otlp_size`)**: When true, startup logs the expected, min and max uncompressed OTLP protobuf attribute bytes per resource, scope and signal level for each configured signal: one line for `data_type` logs or traces (from the generate profile) and one line per metric type for `metric_gen` (weighted by series count). Off by default.
 - **OTLP/HTTP transport (`metric_gen.protocol`, `metrics.otlp.protocol`)**: `metric_gen` and the self-metrics `metrics.otlp` exporter now accept `protocol: grpc` (default) or `http`, matching the otel exporter's OTLP/HTTP support.
 - **OTLP/HTTP support for the otel exporter (`otel.protocol`)**: The otel exporter now accepts `protocol: grpc` (default) or `http`, POSTing protobuf-encoded OTLP requests to the endpoint's per-signal path (`/v1/logs`, `/v1/traces`) with optional gzip compression (#9 by @knudtty).
 - **Per-metric type and cardinality overrides (`metric_gen.metric_types`, `metric_gen.metric_cardinalities`)**: Optional lists parallel to `metric_names`; each requires it, must match its length, and can be set independently. `metric_types` pins each metric's type (`gauge`, `sum`, `histogram`, `exponential_histogram`, `summary`) instead of the `type_weights` round-robin, and `metric_cardinalities` pins each metric's exact series count (each entry >= 1) instead of the cardinality decay curve.

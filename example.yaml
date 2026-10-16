@@ -13,6 +13,8 @@ app:
   data_type: traces
   # A seed for the test. Will be used with random number generation for reproducible tests.
   seed: "some string"
+  # Log the expected, min and max uncompressed OTLP protobuf attribute bytes of each configured signal at startup.
+  print_otlp_size: false
 
 pprof:
   # Address to listen on for the pprof HTTP endpoint.
